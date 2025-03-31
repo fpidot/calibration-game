@@ -1,407 +1,527 @@
-import requests
+import sys
+print("Python sys.path:", sys.path)
 import os
-import json
-import math
-from flask import Flask, render_template, jsonify, request, abort # Added abort (though not used currently)
+import random
+import requests # <-- Added
+import math # <-- Added for Brier score calculation if needed, safe to keep
+from flask import Flask, render_template, request, jsonify, session
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import func, case
+from flask_migrate import Migrate
+from flask_admin import Admin
+from flask_admin.contrib.sqla import ModelView
 from dotenv import load_dotenv
 import google.generativeai as genai
-from datetime import datetime
-from collections import defaultdict
+import wikipediaapi # <-- Changed from 'wikipedia'
 
-# --- NEW: Import Flask-Admin ---
-from flask_admin import Admin
-from flask_admin.contrib.sqla import ModelView # View for SQLAlchemy models
-
-# --- Initialization and Configuration ---
+# --- App Configuration ---
 load_dotenv()
 app = Flask(__name__)
-# Set a secret key for Flask-Admin session management (needed for security features)
-# In production, use a strong, randomly generated key stored securely
-app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'default-insecure-secret-key-for-dev')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY') # Ensure SECRET_KEY is in your .env
 
-# --- Database Configuration ---
-DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "your_postgres_password") # !! USE YOUR ACTUAL PASSWORD !!
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = os.getenv("DB_PORT", "5432")
-DB_NAME = os.getenv("DB_NAME", "wiki_trivia_db")
-
-# Ensure the database 'wiki_trivia_db' exists in PostgreSQL
-app.config['SQLALCHEMY_DATABASE_URI'] = f'postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # Recommended practice
-db = SQLAlchemy(app) # Initialize SQLAlchemy
-
-# --- Gemini Configuration ---
-GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
-if not GEMINI_API_KEY:
-    raise ValueError("Missing Google AI API Key. Make sure it's set in the .env file.")
-genai.configure(api_key=GEMINI_API_KEY)
-gemini_model = genai.GenerativeModel('gemini-1.5-flash-latest')
-
-# --- Wikipedia Config ---
-WIKIPEDIA_API_URL = "https://en.wikipedia.org/w/api.php"
-
+# --- Database Setup ---
+# Assuming db initialization is needed here before models are imported/used
+db = SQLAlchemy(app)
+migrate = Migrate(app, db)
 
 # --- Database Models ---
+# Import models AFTER db is initialized
+# This structure assumes models.py defines models using this 'db' instance
+from models import Response, AppSetting
 
-class UserResponse(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    session_id = db.Column(db.String(80), nullable=False, index=True) # Added index
-    question_text = db.Column(db.Text, nullable=False)
-    correct_answer = db.Column(db.String(255), nullable=False)
-    submitted_answer = db.Column(db.String(255), nullable=False)
-    confidence = db.Column(db.Integer, nullable=False) # Stores 0-100
-    is_correct = db.Column(db.Boolean, nullable=False)
-    brier_score = db.Column(db.Float, nullable=False)
-    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    source_title = db.Column(db.String(255), nullable=True)
-    def __repr__(self): return f'<Response {self.id}>'
+# --- Admin Setup ---
+# Import admin views AFTER models are defined/imported
+from admin_views import AppSettingAdminView
+admin = Admin(app, name='Trivia Admin', template_mode='bootstrap3')
+admin.add_view(AppSettingAdminView(AppSetting, db.session))
 
+# --- Wikipedia API Setup ---
+# Use a specific user agent as recommended by MediaWiki API guidelines
+wiki_wiki = wikipediaapi.Wikipedia(
+    user_agent='WikipediaTriviaGame/1.0 (https://github.com/fpidot/calibration-game; please add contact info in code or env)', # Replace placeholder contact
+    language='en'
+)
 
-# --- NEW: App Settings Model ---
-class AppSetting(db.Model):
-    key = db.Column(db.String(50), primary_key=True) # Setting name (e.g., 'min_summary_words')
-    value = db.Column(db.String(255), nullable=False) # Setting value (stored as string)
-    description = db.Column(db.Text, nullable=True)  # Optional description
+# --- Gemini API Setup ---
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+if not GEMINI_API_KEY:
+    print("Error: GEMINI_API_KEY environment variable not set.")
+    # Handle this case appropriately - maybe exit or disable Gemini features
+else:
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel('gemini-1.5-flash') # Or your preferred model
+    except Exception as e:
+        print(f"Error configuring Gemini API: {e}")
+        # Handle initialization error
 
-    def __repr__(self):
-        return f'<Setting {self.key}={self.value}>'
-
-
-# --- Flask-Admin Setup ---
-
-# Optional: Customize ModelView if needed
-class SettingsView(ModelView):
-    # Prevent creation of new settings keys via the UI (we'll pre-define them)
-    can_create = False
-    # Prevent deletion of settings keys
-    can_delete = False
-    # Columns to display in the list view
-    column_list = ('key', 'value', 'description')
-
-    # --- MODIFICATION ---
-    # Explicitly define only the columns we want editable in the form view.
-    # Since 'key' is the primary key and shouldn't be edited, omit it here.
-    form_columns = ('value', 'description')
-
-    # 'form_edit_rules' is now redundant if form_columns is correctly set,
-    # but keeping it doesn't hurt and reinforces the read-only nature if desired.
-    # Alternatively, you could remove form_edit_rules entirely if form_columns
-    # is sufficient. Let's keep it for clarity for now.
-    form_edit_rules = ('value', 'description')
-
-    column_labels = {'key': 'Setting Name', 'value': 'Setting Value', 'description': 'Description'}
-
-class UserResponseView(ModelView):
-    # Make admin interface read-only for responses for safety
-    can_edit = False
-    can_create = False
-    can_delete = False
-    column_list = ('timestamp', 'session_id', 'question_text', 'is_correct', 'confidence', 'brier_score', 'source_title')
-    column_default_sort = ('timestamp', True) # Sort by timestamp descending
-    column_filters = ('session_id', 'is_correct', 'timestamp', 'source_title') # Add filters
-    page_size = 50 # Show more items per page
-
-
-# Initialize Flask-Admin
-admin = Admin(app, name='WikiTrivia Admin', template_mode='bootstrap4') # Use Bootstrap 4 theme
-
-# Add views to the admin interface
-admin.add_view(SettingsView(AppSetting, db.session, name='App Settings'))
-admin.add_view(UserResponseView(UserResponse, db.session, name='User Responses'))
-
+# --- Constants ---
+MAX_TOKENS = 1000 # Example value for potential future use with other models, not directly used by Gemini helper
+PAGE_FETCH_ATTEMPTS = 5 # Max attempts to find a suitable Wikipedia page via API calls
+MAX_GENERATION_ATTEMPTS = 3 # Max attempts to generate a question from a fetched page
 
 # --- Helper Functions ---
 
-# Helper to get a setting value with a default
-def get_setting(key, default=None):
-    """Gets a setting value from the DB, attempts type conversion, returns default if not found/error."""
-    try:
-        # Use session.get for efficient primary key lookup
-        setting = db.session.get(AppSetting, key)
-        if setting:
-            if default is not None:
-                try:
-                    # Attempt conversion based on default type
-                    if isinstance(default, int): return int(setting.value)
-                    if isinstance(default, float): return float(setting.value)
-                    if isinstance(default, bool): return setting.value.lower() in ['true', '1', 'yes', 'on']
-                    # Add list/dict support via json if needed later
-                    # if isinstance(default, list): return json.loads(setting.value)
-                except (ValueError, TypeError, json.JSONDecodeError) as conversion_error:
-                    print(f"Warning: Failed to convert setting '{key}' value '{setting.value}' to type {type(default).__name__}. Error: {conversion_error}. Using default.")
-                    return default
-            return setting.value # Return as string if no default or type hint
-        return default # Setting key not found
-    except Exception as e:
-        print(f"Error retrieving setting '{key}': {e}. Using default.")
-        return default
+def get_setting(key, default_value):
+    """Fetches a setting from the AppSetting table, returning default if not found or conversion fails."""
+    setting = AppSetting.query.filter_by(setting_key=key).first()
+    if setting and setting.setting_value is not None:
+        # Attempt to convert to the type of the default_value
+        try:
+            value_type = type(default_value)
+            if value_type is bool:
+                # Handle boolean conversion ('true', 'false', '1', '0')
+                val = setting.setting_value.lower().strip()
+                if val in ('true', '1'):
+                    return True
+                elif val in ('false', '0'):
+                    return False
+                else: # Fallback if value is not clearly boolean
+                    print(f"Warning: Non-boolean value '{setting.setting_value}' found for boolean setting '{key}'. Using default.")
+                    return default_value
+            else: # Works for int, float, str
+                return value_type(setting.setting_value)
+        except (ValueError, TypeError) as e:
+            print(f"Warning: Could not convert value '{setting.setting_value}' for setting '{key}' to type {value_type}. Error: {e}. Using default.")
+            return default_value # Return default if conversion fails
+    # print(f"Setting '{key}' not found or value is None. Using default: {default_value}")
+    return default_value
 
-# Function to create default settings if they don't exist
-def create_default_settings():
-    """Checks for essential settings and creates them with defaults if missing."""
-    with app.app_context(): # Ensure we have app context for DB operations
-        defaults = {
-            'min_summary_words': {'value': '25', 'description': 'Minimum words required in Wikipedia summary to generate a question.'},
-            'gemini_context_length': {'value': '2000', 'description': 'Max characters of summary sent to Gemini.'}
-            # Add other future settings here
-        }
-        needs_commit = False
-        for key, data in defaults.items():
-            setting = db.session.get(AppSetting, key)
-            if not setting:
-                print(f"Creating default setting: {key}={data['value']}")
-                new_setting = AppSetting(key=key, value=data['value'], description=data['description'])
-                db.session.add(new_setting)
-                needs_commit = True
-        if needs_commit:
-            try:
-                db.session.commit() # Commit any new settings
-            except Exception as e:
-                print(f"Error committing default settings: {e}")
-                db.session.rollback()
+# Function to get Wikipedia page using different strategies
+def get_wikipedia_page(strategy, keywords_str, categories_str, limit):
+    """
+    Gets a Wikipedia page object based on the selected strategy.
+    Retries fetching different pages up to PAGE_FETCH_ATTEMPTS times if issues occur.
+    Returns a wikipediaapi.WikipediaPage object or None if unsuccessful.
+    """
+    selected_title = None
+    attempts = 0
 
-# Gemini Prompt Creator
-def create_gemini_prompt(title, summary):
-    # Use setting for context length
-    max_summary_length = get_setting('gemini_context_length', 2000)
-    truncated_summary = summary[:max_summary_length]
-    if len(summary) > max_summary_length: truncated_summary += "..."
-    prompt = f"""
-Context:
-Title: {title}
-Summary: {truncated_summary}
+    while attempts < PAGE_FETCH_ATTEMPTS:
+        attempts += 1
+        print(f"Page Fetch Attempt {attempts}/{PAGE_FETCH_ATTEMPTS} using strategy: {strategy}")
+        current_strategy = strategy # Store original strategy in case of fallback
 
-Task: Based *only* on the provided Context, generate a single multiple-choice trivia question. The question should test a factual detail clearly present in the Summary.
+        try:
+            # --- Strategy Selection ---
+            if current_strategy == 'search':
+                keywords = [k.strip() for k in keywords_str.split(',') if k.strip()]
+                if not keywords:
+                    print("Warning: Search strategy selected but no keywords defined. Falling back to random.")
+                    current_strategy = 'random' # Fallback for this attempt
+                else:
+                    keyword = random.choice(keywords)
+                    print(f"Searching with keyword: {keyword}")
+                    # Using the underlying MediaWiki search via requests, as wikipediaapi search is basic
+                    S = requests.Session()
+                    URL = "https://en.wikipedia.org/w/api.php"
+                    PARAMS = {
+                        "action": "query",
+                        "format": "json",
+                        "list": "search",
+                        "srsearch": keyword,
+                        "srnamespace": "0", # Main namespace
+                        "srlimit": limit,   # Limit results considered
+                        "srwhat": "text"    # Search within page text
+                    }
+                    headers = {'User-Agent': wiki_wiki.user_agent}
+                    R = S.get(url=URL, params=PARAMS, headers=headers)
+                    R.raise_for_status()
+                    data = R.json()
+                    search_results = data.get("query", {}).get("search", [])
+                    if search_results:
+                        selected_title = random.choice(search_results)['title']
+                        print(f"Selected '{selected_title}' from search results.")
+                    else:
+                        print(f"No search results found for keyword '{keyword}'. Retrying strategy.")
+                        continue # Try the while loop again (different keyword potentially)
 
-Output Format Requirements:
-Provide your response *only* as a valid JSON object with the following exact keys:
-- "question": A string containing the question text (e.g., "What year was the subject born?").
-- "correct_answer": A string containing the correct answer based *only* on the text.
-- "distractors": A JSON array of 3 strings, each being a plausible but incorrect answer related to the question. Do not repeat the correct answer in the distractors. Ensure distractors are relevant but demonstrably wrong according to the text or general knowledge related to the text.
+            elif current_strategy == 'category':
+                categories = [c.strip() for c in categories_str.split(',') if c.strip()]
+                if not categories:
+                    print("Warning: Category strategy selected but no categories defined. Falling back to random.")
+                    current_strategy = 'random' # Fallback for this attempt
+                else:
+                    category_name_base = random.choice(categories)
+                    # Ensure 'Category:' prefix
+                    category_name = category_name_base if category_name_base.lower().startswith("category:") else f"Category:{category_name_base}"
 
-Example Context:
-Title: Eiffel Tower
-Summary: The Eiffel Tower is a wrought-iron lattice tower on the Champ de Mars in Paris, France. It is named after the engineer Gustave Eiffel, whose company designed and built the tower. Constructed from 1887 to 1889 as the centerpiece of the 1889 World's Fair...
+                    print(f"Fetching members for category: {category_name}")
+                    # Using requests for category members
+                    S = requests.Session()
+                    URL = "https://en.wikipedia.org/w/api.php"
+                    PARAMS = {
+                        "action": "query",
+                        "format": "json",
+                        "list": "categorymembers",
+                        "cmtitle": category_name,
+                        "cmlimit": limit, # Use setting limit
+                        "cmtype": "page", # Only get pages, not subcategories
+                        "cmprop": "title"
+                    }
+                    headers = {'User-Agent': wiki_wiki.user_agent}
+                    R = S.get(url=URL, params=PARAMS, headers=headers)
+                    R.raise_for_status()
+                    data = R.json()
 
-Example Output:
-{{
-  "question": "Who was the engineer the Eiffel Tower is named after?",
-  "correct_answer": "Gustave Eiffel",
-  "distractors": ["Napoleon Bonaparte", "Charles de Gaulle", "Leonardo da Vinci"]
-}}
+                    members = data.get("query", {}).get("categorymembers", [])
+                    if members:
+                        selected_title = random.choice(members)['title']
+                        print(f"Selected '{selected_title}' from category members.")
+                    else:
+                        print(f"No page members found in category '{category_name}'. Retrying strategy.")
+                        continue # Try the while loop again (different category potentially)
 
-Constraints:
-- Base the question and *especially* the correct answer strictly on the provided Summary text.
-- Do not ask questions where the answer is not in the Summary.
-- Generate exactly one question.
-- Ensure distractors are plausible but verifiably incorrect based on the Summary or closely related common knowledge.
-- Output *only* the JSON object, with no other surrounding text or explanations.
+            # Default ('random') or fallback strategy
+            if current_strategy == 'random' or selected_title is None and current_strategy != 'random':
+                print("Using random strategy or falling back to random.")
+                S = requests.Session()
+                URL = "https://en.wikipedia.org/w/api.php"
+                PARAMS = {
+                    "action": "query",
+                    "format": "json",
+                    "list": "random",
+                    "rnnamespace": "0", # Namespace 0 is main articles
+                    "rnlimit": "1"      # Get 1 random page
+                }
+                headers = {'User-Agent': wiki_wiki.user_agent}
+                R = S.get(url=URL, params=PARAMS, headers=headers)
+                R.raise_for_status()
+                data = R.json()
+                random_pages = data.get("query", {}).get("random", [])
+                if random_pages:
+                     selected_title = random_pages[0]["title"]
+                     print(f"Selected random page: {selected_title}")
+                else:
+                    print("Could not fetch random page title via API. Retrying strategy.")
+                    continue # Try the while loop again
 
-Now, generate the question based on the Context provided above.
+            # --- Page Validation ---
+            if selected_title:
+                print(f"Fetching page content for: {selected_title}")
+                page = wiki_wiki.page(selected_title)
+                if page and page.exists():
+                    # Check for disambiguation pages or very short stubs
+                    summary_lower = page.summary.lower()
+                    min_summary_words_check = get_setting('min_summary_words', 50) # Check against setting
+                    # Heuristic checks:
+                    is_disambiguation = "may refer to:" in summary_lower or page.title.lower().endswith("(disambiguation)")
+                    is_stub = len(page.sections) <= 1 and len(summary_lower.split()) < min_summary_words_check // 2 # Crude stub check
+
+                    if is_disambiguation:
+                        print(f"Page '{selected_title}' seems to be a disambiguation page. Retrying strategy.")
+                        selected_title = None # Reset title to retry loop
+                        continue # Try the while loop again
+                    if is_stub:
+                        print(f"Page '{selected_title}' seems to be a stub (too short). Retrying strategy.")
+                        selected_title = None # Reset title to retry loop
+                        continue # Try the while loop again
+
+                    # If checks pass, return the valid page object
+                    print(f"Successfully fetched and validated page: {page.title}")
+                    return page
+                else:
+                    print(f"Page '{selected_title}' does not exist or could not be fetched by wikipediaapi. Retrying strategy.")
+                    selected_title = None # Reset title to retry loop
+
+        except requests.exceptions.RequestException as e:
+            print(f"Network or API error during page fetch: {e}. Retrying strategy.")
+            selected_title = None # Reset title to retry loop
+        except Exception as e: # Catch other potential errors (e.g., JSON parsing, unexpected API response)
+            print(f"An unexpected error occurred during page fetch: {e}. Retrying strategy.")
+            selected_title = None # Reset title to retry loop
+
+    print(f"Failed to find a suitable Wikipedia page after {PAGE_FETCH_ATTEMPTS} attempts.")
+    return None # Failed to get a page after all attempts
+
+
+def generate_question_from_text(text, context_length):
+    """Generates a multiple-choice question from text using the Gemini API."""
+    if not text:
+        print("Error: Cannot generate question from empty text.")
+        return None, None, None
+
+    if 'model' not in globals(): # Check if Gemini model initialized successfully
+        print("Error: Gemini model not available.")
+        return None, None, None
+
+    text_to_send = text[:context_length] # Use context_length setting
+
+    prompt = f"""Create a multiple-choice trivia question based *only* on the following text. The question should be specific, answerable from the text, and not require outside knowledge. Provide the question, 4 distinct answer choices (A, B, C, D) where only one is correct according to the text, and indicate the correct answer letter. Format the output *exactly* like this, with each part on a new line:
+
+Question: [Your question here]
+A) [Choice A]
+B) [Choice B]
+C) [Choice C]
+D) [Choice D]
+Correct Answer: [Correct Letter (A, B, C, or D)]
+
+Text:
+{text_to_send}
 """
-    return prompt
+    try:
+        # Use the 'model' instance defined globally
+        response = model.generate_content(prompt)
 
-# Brier Score Calculator
-def calculate_brier_score(confidence_percent, is_correct):
-    probability = confidence_percent / 100.0
+        # --- Robust Parsing ---
+        content = response.text.strip()
+        lines = content.split('\n')
+
+        question = None
+        options = {}
+        correct_answer_letter = None
+
+        if len(lines) >= 6:
+            if lines[0].startswith("Question:"):
+                question = lines[0][len("Question:"):].strip()
+            possible_options = lines[1:5]
+            option_prefixes = ['A)', 'B)', 'C)', 'D)']
+            temp_options = {}
+            valid_options = True
+            for i, line in enumerate(possible_options):
+                prefix = option_prefixes[i]
+                if line.startswith(prefix):
+                    temp_options[prefix[0]] = line[len(prefix):].strip()
+                else:
+                    valid_options = False
+                    print(f"Parsing Error: Option line '{line}' does not start with expected prefix '{prefix}'.")
+                    break # Stop parsing options if format breaks
+            if valid_options and len(temp_options) == 4:
+                options = temp_options
+
+            if lines[5].startswith("Correct Answer:"):
+                 correct_answer_letter = lines[5][len("Correct Answer:"):].strip().upper()
+                 # Validate the letter is one of the options
+                 if correct_answer_letter not in options:
+                     print(f"Parsing Error: Correct Answer letter '{correct_answer_letter}' not in parsed options keys {list(options.keys())}.")
+                     correct_answer_letter = None # Invalidate if not A, B, C, or D
+
+        if not all([question, options, correct_answer_letter]):
+            print(f"Error: Failed to parse Gemini response reliably. Response received:\n---\n{content}\n---")
+            return None, None, None # Return None if parsing failed
+
+        print("Successfully parsed Gemini response.")
+        return question, options, correct_answer_letter
+
+    except Exception as e:
+        print(f"Error generating question or parsing response with Gemini: {e}")
+        # Log the full error potentially
+        # Consider checking specific Gemini API error types if the library provides them
+        return None, None, None
+
+
+def calculate_brier_score(confidence, is_correct):
+    """Calculates the Brier score for a single prediction."""
+    # Confidence is 0-100, convert to 0.0-1.0 probability
+    probability = confidence / 100.0
+    # Outcome is 1 if correct, 0 if incorrect
     outcome = 1.0 if is_correct else 0.0
-    return (probability - outcome) ** 2
+    return (probability - outcome)**2
 
+# --- Routes ---
 
-# --- Flask Routes ---
 @app.route('/')
 def index():
-    """Renders the main HTML page and ensures DB tables & default settings exist."""
-    # No need for explicit app_context here as Flask handles it in routes
-    # db.create_all() might be better placed in init script or using Flask-Migrate
-    # But for simplicity, keep it here for now. It's idempotent.
-    db.create_all()
-    create_default_settings() # Ensure default settings exist
-    return render_template('index.html')
+    # Initialize session stats if not present
+    if 'stats' not in session:
+        session['stats'] = {'total_answered': 0, 'total_correct': 0, 'brier_scores': [], 'confidence_levels': [], 'correctness': []}
+    # Ensure lists exist even if counts are 0
+    for key in ['brier_scores', 'confidence_levels', 'correctness']:
+        if key not in session['stats']:
+             session['stats'][key] = []
 
+    # Make sure session changes are saved if we modified it
+    session.modified = True
+    return render_template('index.html', stats=session['stats'])
 
-@app.route('/get_trivia_question')
+@app.route('/get_trivia_question', methods=['GET'])
 def get_trivia_question():
-    """Fetches a random Wikipedia article and generates a trivia question."""
-    # Use setting for minimum summary words
-    min_words = get_setting('min_summary_words', 15)
+    # Get settings from DB with defaults
+    min_summary_words = get_setting('min_summary_words', 50)
+    gemini_context_length = get_setting('gemini_context_length', 3000)
+    page_selection_strategy = get_setting('page_selection_strategy', 'random').lower() # Use lower case
+    search_keywords = get_setting('search_keywords', 'History, Science, Technology, Art, Geography, Culture, Philosophy, Sports')
+    target_categories = get_setting('target_categories', 'Physics, World_War_II, Cities_in_France, Mammals, Programming_languages') # No "Category:" prefix needed
+    api_result_limit = get_setting('api_result_limit', 20)
 
-    wiki_params = {
-        "action": "query", "format": "json", "generator": "random",
-        "grnnamespace": 0, "grnlimit": 1, "prop": "extracts",
-        "exintro": True, "explaintext": True, "origin": "*"
+    print(f"\n--- Requesting new question ---")
+    print(f"Using settings: Strategy='{page_selection_strategy}', MinWords={min_summary_words}, ContextLen={gemini_context_length}, Limit={api_result_limit}")
+
+    page = None
+    question = None
+    options = None
+    correct_answer = None
+    wiki_page_title = None
+    wiki_page_url = None
+
+    generation_attempt = 0
+    # Loop tries to fetch a VALID page AND generate a VALID question from it
+    while generation_attempt < MAX_GENERATION_ATTEMPTS:
+        generation_attempt += 1
+        print(f"\nOverall Generation Attempt {generation_attempt}/{MAX_GENERATION_ATTEMPTS}")
+
+        # Step 1: Get a valid Wikipedia page using the selected strategy
+        # The get_wikipedia_page function handles its own retries for fetching pages
+        page = get_wikipedia_page(page_selection_strategy, search_keywords, target_categories, api_result_limit)
+
+        if not page:
+            print("Failed to get a suitable page after internal retries. Aborting question generation for this request.")
+            # No need to continue generation attempts if we can't even get a page
+            return jsonify({"error": "Could not retrieve a suitable Wikipedia article after multiple attempts."}), 503 # Service Unavailable might fit
+
+        wiki_page_title = page.title
+        wiki_page_url = page.fullurl
+        summary = page.summary # Or use page.text for potentially more content
+
+        print(f"Attempting to generate question for: {wiki_page_title}")
+        print(f"Summary length: {len(summary)} chars, ~{len(summary.split())} words.")
+
+        # Step 2: Check if summary is long enough based on settings
+        if len(summary.split()) < min_summary_words:
+            print(f"Summary too short ({len(summary.split())} words, minimum {min_summary_words}). Trying to get a new page.")
+            page = None # Discard this page
+            # Continue the loop to try fetching a *different* page and generating from it
+            continue
+
+        # Step 3: Generate Q&A using Gemini from the valid page's summary
+        question, options, correct_answer = generate_question_from_text(summary, gemini_context_length)
+
+        if question and options and correct_answer:
+            print(f"Successfully generated question for '{wiki_page_title}'.")
+            break # Exit the loop, we have a valid page and question
+        else:
+            print(f"Failed to generate valid Q&A from summary of '{wiki_page_title}'. Trying to get a new page.")
+            page = None # Discard this page, the summary might be problematic for Gemini
+            # Continue the loop to try fetching a *different* page and generating from it
+
+    # --- After the loop ---
+    if not (page and question and options and correct_answer):
+        print(f"Failed to generate a question after {MAX_GENERATION_ATTEMPTS} attempts (fetching page + generating Q&A).")
+        # Send error response if we exhausted attempts without success
+        return jsonify({"error": f"Failed to generate a trivia question after {MAX_GENERATION_ATTEMPTS} attempts."}), 500 # Internal Server Error
+
+    # Store context for answer checking
+    session['current_question'] = {
+        'title': wiki_page_title,
+        'url': wiki_page_url,
+        'question': question,
+        'options': options, # This is the dict { 'A': '...', 'B': '...' }
+        'correct_answer_letter': correct_answer # Just the letter 'A', 'B', 'C', or 'D'
     }
-    try: # Wikipedia Fetch
-        wiki_response = requests.get(WIKIPEDIA_API_URL, params=wiki_params, timeout=10)
-        wiki_response.raise_for_status()
-        wiki_data = wiki_response.json()
-        pages = wiki_data.get('query', {}).get('pages', {})
-        if not pages: raise ValueError("No pages found in Wikipedia API response")
-        page_id = list(pages.keys())[0]
-        page_data = pages[page_id]
-        title = page_data.get('title', 'Unknown Title')
-        summary = page_data.get('extract', '')
+    session.modified = True # Ensure session is saved
 
-        # Use setting in check
-        if not summary or len(summary.split()) < min_words:
-            print(f"Summary for '{title}' too short (< {min_words} words), skipping.")
-            # Consider adding retry logic here if this happens often
-            return jsonify({"error": f"Summary for '{title}' too short/missing (min {min_words} words)."}), 400
-
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching from Wikipedia API: {e}")
-        return jsonify({"error": "Could not connect to Wikipedia API"}), 503
-    except (ValueError, KeyError, IndexError) as e:
-        print(f"Error parsing Wikipedia API response: {e}")
-        return jsonify({"error": "Could not parse Wikipedia API response"}), 500
-
-    try: # Gemini Call
-        prompt = create_gemini_prompt(title, summary)
-        gemini_response = gemini_model.generate_content(prompt)
-        response_text = ""
-        if gemini_response.parts:
-            response_text = gemini_response.parts[0].text
-        else:
-            reason="Unknown"; print(f"Gemini response blocked/empty. Feedback: {gemini_response.prompt_feedback}")
-            if hasattr(gemini_response.prompt_feedback, 'block_reason'): reason = str(gemini_response.prompt_feedback.block_reason)
-            return jsonify({"error": f"Gemini response blocked or empty. Reason: {reason}"}), 500
-
-        json_start = response_text.find('{')
-        json_end = response_text.rfind('}') + 1
-        if json_start != -1 and json_end != -1:
-            clean_response_text = response_text[json_start:json_end]
-        else:
-            raise ValueError(f"Could not find valid JSON object in Gemini response. Raw: {response_text}")
-
-        question_data = json.loads(clean_response_text)
-        if not all(k in question_data for k in ["question", "correct_answer", "distractors"]):
-            raise ValueError("Gemini response missing required keys.")
-        if not isinstance(question_data["distractors"], list) or len(question_data["distractors"]) != 3:
-             raise ValueError("Gemini response 'distractors' is not a list of 3 strings.")
-
-        question_data['source_title'] = title
-        return jsonify(question_data)
-
-    except genai.types.generation_types.BlockedPromptException as e:
-         print(f"Gemini Prompt blocked: {e}")
-         return jsonify({"error": f"Content generation blocked by API safety filters. {e}"}), 400
-    except Exception as e: # Catches JSON parsing errors too
-        print(f"Error interacting with Gemini API or parsing response: {e}")
-        return jsonify({"error": "Failed to generate question via AI model or parse its response"}), 500
+    print(f"Sending question to client: {question}")
+    return jsonify({
+        'question': question,
+        'options': options, # Send the options dict
+        'wiki_page_title': wiki_page_title,
+        'wiki_page_url': wiki_page_url
+    })
 
 
 @app.route('/submit_answer', methods=['POST'])
 def submit_answer():
-    """Receives answer submission, calculates score, saves to DB."""
     data = request.get_json()
-    required_keys = ['question', 'correct_answer', 'submitted_answer', 'confidence', 'session_id', 'source_title']
-    if not data or not all(key in data for key in required_keys):
-        return jsonify({"error": "Missing data in submission"}), 400
+    user_answer_letter = data.get('answer')
+    user_confidence = data.get('confidence')
+
+    if 'current_question' not in session:
+        return jsonify({"error": "No active question found in session."}), 400
+
+    if user_answer_letter is None or user_confidence is None:
+        return jsonify({"error": "Missing answer or confidence."}), 400
 
     try:
-        question_text = data['question']
-        correct_answer = data['correct_answer']
-        submitted_answer = data['submitted_answer']
-        confidence = int(data['confidence'])
-        session_id = data['session_id']
-        source_title = data['source_title']
+        user_confidence = int(user_confidence)
+        if not (0 <= user_confidence <= 100):
+            raise ValueError("Confidence out of range")
+    except ValueError:
+        return jsonify({"error": "Invalid confidence value."}), 400
 
-        # Validation check for confidence (0-100)
-        if not (0 <= confidence <= 100):
-            raise ValueError("Confidence must be between 0 and 100.")
+    current_q = session['current_question']
+    correct_answer_letter = current_q['correct_answer_letter']
 
-        is_correct = (submitted_answer == correct_answer)
-        brier_score = calculate_brier_score(confidence, is_correct)
+    # Get the text of the correct answer for display
+    correct_answer_text = current_q['options'].get(correct_answer_letter)
 
-        response_record = UserResponse(
-            session_id=session_id, question_text=question_text, correct_answer=correct_answer,
-            submitted_answer=submitted_answer, confidence=confidence, is_correct=is_correct,
-            brier_score=brier_score, source_title=source_title
+    is_correct = (user_answer_letter == correct_answer_letter)
+
+    # Calculate Brier score
+    brier_score = calculate_brier_score(user_confidence, is_correct)
+
+    # Update session statistics
+    if 'stats' not in session:
+        # Initialize stats if missing (shouldn't happen normally)
+        session['stats'] = {'total_answered': 0, 'total_correct': 0, 'brier_scores': [], 'confidence_levels': [], 'correctness': []}
+        for key in ['brier_scores', 'confidence_levels', 'correctness']: # Ensure lists exist
+            if key not in session['stats']: session['stats'][key] = []
+
+    session['stats']['total_answered'] += 1
+    if is_correct:
+        session['stats']['total_correct'] += 1
+    session['stats']['brier_scores'].append(brier_score)
+    session['stats']['confidence_levels'].append(user_confidence)
+    session['stats']['correctness'].append(is_correct)
+
+    session.modified = True # Crucial: mark session as modified
+
+    # Store response in database
+    try:
+        response_entry = Response(
+            session_id=session.sid if hasattr(session, 'sid') else request.remote_addr, # Use session id or IP as fallback identifier
+            wiki_page_title=current_q['title'],
+            question_text=current_q['question'],
+            answer_options=str(current_q['options']), # Store options as string
+            correct_answer=correct_answer_letter,
+            user_answer=user_answer_letter,
+            user_confidence=user_confidence,
+            is_correct=is_correct,
+            brier_score=brier_score
         )
-        db.session.add(response_record)
+        db.session.add(response_entry)
         db.session.commit()
-
-        return jsonify({
-            "message": "Answer submitted successfully", "is_correct": is_correct,
-            "correct_answer": correct_answer, "brier_score": brier_score,
-            "response_id": response_record.id
-        }), 200
-
-    except ValueError as e:
-         print(f"Validation Error: {e}")
-         return jsonify({"error": f"Invalid data: {e}"}), 400
     except Exception as e:
-        db.session.rollback() # Rollback DB changes on error
-        print(f"Error submitting answer: {e}")
-        return jsonify({"error": "Failed to process answer submission"}), 500
+        db.session.rollback()
+        print(f"Error saving response to database: {e}")
+        # Decide if this should be a user-facing error or just logged
+        # return jsonify({"error": "Failed to save response to database."}), 500
 
+    # Clear current question from session after processing
+    session.pop('current_question', None)
+    session.modified = True
 
-@app.route('/get_stats')
-def get_stats():
-    """Calculates and returns aggregate stats for a given session."""
-    session_id = request.args.get('session_id')
-    if not session_id:
-        return jsonify({"error": "Missing session_id parameter"}), 400
-
-    try:
-        # Query using SQLAlchemy's func for aggregation
-        stats = db.session.query(
-            func.count(UserResponse.id).label('total_questions'),
-            func.sum(case((UserResponse.is_correct == True, 1), else_=0)).label('correct_answers'),
-            func.avg(UserResponse.brier_score).label('average_brier_score')
-        ).filter(UserResponse.session_id == session_id).one() # Use .one() as we expect one row of stats
-
-        total_questions = stats.total_questions or 0 # Handle case where no questions are answered yet
-        correct_answers = stats.correct_answers or 0
-        average_brier_score = stats.average_brier_score if stats.average_brier_score is not None else 0.0 # Handle None if no questions
-
-        percent_correct = (correct_answers / total_questions * 100) if total_questions > 0 else 0
-
-        return jsonify({
-            "session_id": session_id,
-            "total_questions": total_questions,
-            "correct_answers": correct_answers,
-            "percent_correct": round(percent_correct, 1),
-            "average_brier_score": round(average_brier_score, 3) # Brier score is typically shown with more decimals
-        })
-
-    except Exception as e:
-        print(f"Error calculating stats for session {session_id}: {e}")
-        return jsonify({"error": "Failed to calculate statistics"}), 500
-
-
-@app.route('/get_calibration_data')
-def get_calibration_data():
-    """Fetches confidence and correctness data for the session."""
-    session_id = request.args.get('session_id')
-    if not session_id:
-        return jsonify({"error": "Missing session_id parameter"}), 400
-
-    try:
-        # Query for individual confidence and correctness pairs
-        calibration_data = db.session.query(
-            UserResponse.confidence,
-            UserResponse.is_correct
-        ).filter(UserResponse.session_id == session_id).order_by(UserResponse.timestamp).all()
-
-        # Format data for easy JSON serialization
-        results = [
-            {"confidence": row.confidence, "is_correct": row.is_correct}
-            for row in calibration_data
-        ]
-
-        return jsonify(results)
-
-    except Exception as e:
-        print(f"Error fetching calibration data for session {session_id}: {e}")
-        return jsonify({"error": "Failed to fetch calibration data"}), 500
+    return jsonify({
+        "result": "correct" if is_correct else "incorrect",
+        "correct_answer": correct_answer_letter,
+        "correct_answer_text": correct_answer_text,
+        "brier_score": round(brier_score, 3),
+        "new_stats": session['stats'] # Send updated stats back
+    })
 
 
 # --- Main Execution ---
 if __name__ == '__main__':
-    # debug=True enables auto-reloading and error pages during development
-    # In production, set debug=False and use a proper WSGI server (like Gunicorn or Waitress)
-    app.run(debug=True)
+    # Optional: Add logic here to check/populate default AppSetting keys if they don't exist in the DB
+    # This requires the app context
+    with app.app_context():
+        db.create_all() # Ensure tables exist
+
+        # Example: Check and add default settings if missing
+        defaults = {
+            'min_summary_words': '50',
+            'gemini_context_length': '3000',
+            'page_selection_strategy': 'random',
+            'search_keywords': 'History, Science, Technology, Art, Geography, Culture, Philosophy, Sports',
+            'target_categories': 'Physics, World_War_II, Cities_in_France, Mammals, Programming_languages',
+            'api_result_limit': '20'
+        }
+        for key, value in defaults.items():
+            exists = AppSetting.query.filter_by(setting_key=key).first()
+            if not exists:
+                print(f"Adding default setting: {key} = {value}")
+                setting = AppSetting(setting_key=key, setting_value=value)
+                db.session.add(setting)
+        db.session.commit() # Commit any newly added defaults
+
+    app.run(debug=True) # IMPORTANT: Turn off debug=True in a production environment!
