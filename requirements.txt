@@ -1,0 +1,7 @@
+Flask>=2.0
+requests>=2.20
+google-generativeai>=0.4  # Or check for the latest version
+python-dotenv>=1.0
+Flask-SQLAlchemy>=2.5 # Ensure you have a recent version
+psycopg2-binary>=2.8
+Flask-Admin>=1.5 # Add Flask-Admin

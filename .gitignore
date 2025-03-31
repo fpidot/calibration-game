@@ -1,0 +1,30 @@
+# Environment variables
+.env
+*.env
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE / Editor specific files
+.idea/
+.vscode/
+*.swp
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Add any other sensitive files or large directories you don't want in git
+# e.g., instance/app.db if you use SQLite locally and don't want it versioned
+# instance/ # Usually contains secrets or DBs for Flask
+
+# Logs
+*.log
