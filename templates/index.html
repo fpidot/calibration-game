@@ -287,42 +287,68 @@
         }
 
         function renderCalibrationChart(data) {
-             const points = data.points || []; // Ensure points is an array
+            // data is expected to be like: { points: [ {x: avg_conf, y: accuracy, count: n}, ... ] }
+            const points = data.points || []; // Ensure points is an array
 
-             // Prepare data for Chart.js scatter plot
-             const chartData = points.map(p => ({
-                 x: p.x, // Average confidence in bin
-                 y: p.y  // Accuracy in bin
+            console.log("Rendering calibration chart with points:", points); // Debug log
+
+            // Prepare data for Chart.js scatter plot
+            const chartData = points.map(p => ({
+                 x: p.x, // Average confidence in bin (%)
+                 y: p.y  // Accuracy in bin (0.0 to 1.0)
              }));
 
-             // Add ideal calibration line (y=x)
-             const perfectLine = [{x: 0, y: 0}, {x: 100, y: 1}]; // Plotting accuracy 0-1 vs confidence 0-100
+            // Calculate point radius based on count (e.g., sqrt relation, with min/max)
+            const counts = points.map(p => p.count);
+            const maxCount = Math.max(1, ...counts); // Avoid maxCount being 0 if no counts yet
+            const minRadius = 3;
+            const maxRadius = 15;
+            const pointRadii = points.map(p => {
+                // Scale radius based on count relative to max count
+                // Using sqrt makes smaller counts more visible than linear
+                if (p.count <= 0) return minRadius;
+                // Normalize count (0 to 1), apply sqrt, scale to radius range
+                let radius = minRadius + (maxRadius - minRadius) * Math.sqrt(p.count / maxCount);
+                return Math.min(radius, maxRadius); // Ensure it doesn't exceed max
+            });
 
-             if (calibrationChart) {
+            // Data for the ideal calibration line (y=x)
+            // Accuracy (y) is 0-1, Confidence (x) is 0-100
+            const perfectLine = [{x: 0, y: 0}, {x: 100, y: 1.0}];
+
+            if (calibrationChart) {
+                // Update existing chart
                 calibrationChart.data.datasets[0].data = chartData;
-                // calibrationChart.data.datasets[1].data = perfectLine; // Update perfect line too if needed
+                calibrationChart.data.datasets[0].pointRadius = pointRadii; // Update radii
+                // calibrationChart.data.datasets[1].data = perfectLine; // Perfect line doesn't change
                 calibrationChart.update();
+                console.log("Calibration chart updated.");
             } else {
+                // Create new chart
+                console.log("Creating new calibration chart.");
                 calibrationChart = new Chart(calibrationChartCtx, {
-                    type: 'scatter',
+                    type: 'scatter', // Use scatter plot for (Avg Confidence, Accuracy) points
                     data: {
                         datasets: [
                             {
-                                label: 'Calibration',
-                                data: chartData,
-                                backgroundColor: 'rgba(0, 0, 255, 0.6)', // Blue dots
-                                pointRadius: 5,
-                                pointHoverRadius: 7
+                                label: 'Calibration Bins',
+                                data: chartData, // Our calculated points {x: avg_conf, y: accuracy}
+                                backgroundColor: 'rgba(0, 0, 255, 0.7)', // Blue dots
+                                borderColor: 'rgba(0, 0, 255, 1)',
+                                pointRadius: pointRadii, // Array of radii based on counts
+                                pointHoverRadius: pointRadii.map(r => r + 2), // Slightly larger on hover
+                                order: 2 // Draw scatter points on top of the line
                             },
                             {
                                 label: 'Perfect Calibration',
-                                data: perfectLine,
-                                type: 'line', // Draw this as a line
-                                borderColor: 'rgba(255, 0, 0, 0.5)', // Red line
-                                borderWidth: 1,
-                                pointRadius: 0, // No points on the line
+                                data: perfectLine, // Data points for the diagonal line
+                                type: 'line', // Render this dataset as a line
+                                borderColor: 'rgba(200, 200, 200, 0.8)', // Light gray line
+                                borderWidth: 2,
+                                pointRadius: 0, // No points on the line itself
                                 fill: false,
-                                tension: 0 // Straight line
+                                tension: 0, // Straight line
+                                order: 1 // Draw line behind points
                             }
                         ]
                     },
@@ -331,33 +357,46 @@
                             x: {
                                 type: 'linear',
                                 position: 'bottom',
-                                title: { display: true, text: 'Average Confidence (%)' },
+                                title: { display: true, text: 'Average Confidence in Bin (%)' },
                                 min: 0,
                                 max: 100
                             },
                             y: {
-                                title: { display: true, text: 'Accuracy' },
+                                title: { display: true, text: 'Accuracy (Proportion Correct)' },
                                 min: 0,
-                                max: 1 // Accuracy is 0.0 to 1.0
+                                max: 1.0 // Accuracy is 0.0 to 1.0
                             }
                         },
                         plugins: {
-                             tooltip: {
+                            tooltip: {
                                 callbacks: {
                                     label: function(context) {
-                                        // Find original point data to get count if needed
-                                        const pointIndex = context.dataIndex;
-                                        const originalPoint = points[pointIndex]; // Assumes points array matches chartData array order
-                                        let label = ` Avg Confidence: ${context.parsed.x.toFixed(1)}%`;
-                                        label += `, Accuracy: ${(context.parsed.y * 100).toFixed(1)}%`;
-                                        if(originalPoint && originalPoint.count){
-                                             label += ` (Count: ${originalPoint.count})`;
+                                        // context.datasetIndex 0 is our scatter points
+                                        if (context.datasetIndex === 0) {
+                                            const pointIndex = context.dataIndex;
+                                            // Access original points array to get count
+                                            const originalPoint = points[pointIndex];
+                                            if (!originalPoint) return "Data point error";
+
+                                            let label = ` Bin ${pointIndex + 1}:`;
+                                            label += ` Avg Confidence: ${originalPoint.x.toFixed(1)}%`;
+                                            label += `, Accuracy: ${(originalPoint.y * 100).toFixed(1)}%`;
+                                            label += ` (Count: ${originalPoint.count})`;
+                                            return label;
+                                        } else {
+                                            // Tooltip for the perfect line (optional)
+                                            // return context.dataset.label;
+                                            return null; // Don't show tooltip for perfect line
                                         }
-                                        return label;
                                     }
                                 }
-                             }
-                        }
+                            },
+                            legend: {
+                                 display: true // Show legend for 'Calibration Bins' and 'Perfect Calibration'
+                            }
+                        },
+                        responsive: true,
+                        maintainAspectRatio: true // Adjust as needed
                     }
                 });
             }

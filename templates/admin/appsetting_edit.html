@@ -1,0 +1,74 @@
+{% extends 'admin/model/edit.html' %}
+{% import 'admin/lib.html' as lib with context %}
+{% import 'admin/static.html' as admin_static with context %}
+
+{# Override the form rendering block #}
+{% block form %}
+  {# Use Flask-Admin's helper to generate the form tag and CSRF token #}
+  {{ lib.render_form_tag(form, action=action) }}
+
+    {# Display standard Flask-Admin fieldsets if needed, or render manually #}
+    {# {{ lib.render_form_fields(form, form_opts=form_opts) }} #}
+
+    {# --- Manual Field Rendering --- #}
+
+    {# Display Setting Key (Read-only) #}
+    <div class="form-group">
+        <label class="col-md-2 control-label">{{ _gettext('Setting Key') }}</label>
+        <div class="col-md-10">
+            <input class="form-control" type="text" readonly value="{{ model.setting_key }}" style="background-color:#eee;">
+        </div>
+    </div>
+
+    {# Display Description (Read-only) #}
+    <div class="form-group">
+        <label class="col-md-2 control-label">{{ _gettext('Description') }}</label>
+        <div class="col-md-10">
+            <textarea class="form-control" readonly style="background-color:#eee;" rows="2">{{ model.description }}</textarea>
+        </div>
+    </div>
+
+    {# Conditionally Render Value Field #}
+    <div class="form-group {% if form.setting_value.errors %}has-error{% endif %}">
+        <label for="setting_value" class="col-md-2 control-label">{{ _gettext('Value') }}</label>
+        <div class="col-md-10">
+            {% if model.setting_key == 'page_selection_strategy' %}
+                {# Render a Select field #}
+                 <select name="setting_value" class="form-control">
+                     {# CHANGE 'admin_view.STRATEGY_CHOICES' to 'strategy_choices' #}
+                    {% for value, label in strategy_choices %}
+                       <option value="{{ value }}" {% if value == model.setting_value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            {% else %}
+                {# Render a TextArea field #}
+                {{ form.setting_value(class="form-control", rows="3") }}
+            {% endif %}
+
+            {# ... (Error display logic) ... #}
+        </div>
+    </div>
+
+    {# Include hidden fields (like CSRF token and ID) #}
+    {{ form.hidden_tag() }}
+    {# Make sure the hidden ID field from our form is rendered #}
+    {% if form.id %} {{ form.id() }} {% endif %}
+
+  {# --- End Manual Field Rendering --- #}
+
+
+  {# Standard Flask-Admin buttons #}
+  <div class="form-group">
+      <div class="col-md-offset-2 col-md-10">
+          {{ lib.render_form_buttons(return_url, extra=form_opts.form_buttons if form_opts else None) }}
+      </div>
+  </div>
+
+  {{ lib.render_form_end() }}
+{% endblock %}
+
+{# Optionally override script blocks if needed #}
+{% block tail %}
+    {{ super() }}
+    {# Add custom JS if necessary #}
+{% endblock %}
