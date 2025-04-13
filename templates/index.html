@@ -3,400 +3,382 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wikipedia Trivia Game</title>
-    <!-- Include Chart.js from CDN -->
+    <title>Wikipedia Calibration Game</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script> <!-- If using time scale, otherwise remove -->
     <style>
-        /* --- Comprehensive Styles --- */
-        body { font-family: sans-serif; max-width: 800px; margin: 20px auto; padding: 15px; line-height: 1.6; }
-        #question-area { margin-top: 20px; padding: 15px; border: 1px solid #ccc; border-radius: 5px; background-color: #f9f9f9; min-height: 100px;}
-        #question-text { font-weight: bold; margin-bottom: 15px; }
-        .option { margin-bottom: 10px; padding: 8px; border: 1px solid #eee; border-radius: 4px; cursor: pointer; transition: background-color 0.2s, border-color 0.2s; }
-        .option:hover:not(.disabled) { background-color: #f0f0f0; }
-        .option.selected { background-color: #d0e0ff !important; border-color: #a0c0ff !important; }
-        .option.correct { background-color: #d0ffd0 !important; border-color: #a0ffa0 !important; }
-        .option.incorrect { background-color: #ffd0d0 !important; border-color: #ffa0a0 !important; }
-        .option.disabled { cursor: default; opacity: 0.7; }
-        #confidence-area { margin-top: 20px; }
-        #confidence-slider { width: 100%; cursor: pointer; }
-        #confidence-value { font-weight: bold; }
-        button { padding: 10px 15px; font-size: 1em; cursor: pointer; margin-top: 10px; border-radius: 4px; border: 1px solid #ccc; background-color: #eee;}
-        button:hover:not(:disabled) { background-color: #ddd; }
-        button:disabled { cursor: not-allowed; opacity: 0.6; }
-        #loading { display: none; color: grey; margin-top: 10px;}
-        #error { display: none; color: red; font-weight: bold; margin-top: 10px; background-color: #ffeeee; border: 1px solid red; padding: 8px; border-radius: 4px;}
-        #feedback { margin-top: 15px; padding: 10px; border-radius: 4px; display: none; }
-        #feedback.correct { background-color: #e0ffe0; border: 1px solid #c0ffc0; color: #006400; }
-        #feedback.incorrect { background-color: #ffe0e0; border: 1px solid #ffc0c0; color: #8b0000; }
-        #source-title { font-size: 0.9em; color: #555; margin-top: 5px; } /* Adjusted margin */
-        #stats-area { margin-top: 30px; padding: 15px; border: 1px solid #b0b0b0; border-radius: 5px; background-color: #f0f8ff; display: none; }
-        #stats-area h2 { margin-top: 0; border-bottom: 1px solid #ccc; padding-bottom: 5px; margin-bottom: 10px;}
-        #stats-list { list-style: none; padding: 0; }
-        #stats-list li { margin-bottom: 5px; }
-        #stats-list strong { display: inline-block; width: 180px; }
-        #calibration-chart-area { margin-top: 30px; padding: 15px; border: 1px solid #b0b0b0; border-radius: 5px; background-color: #fff; display: none; }
-        #calibration-chart-area h2 { margin-top: 0; border-bottom: 1px solid #ccc; padding-bottom: 5px; margin-bottom: 10px;}
-        #calibrationChart { max-width: 100%; height: auto; } /* Responsive chart */
+        body { font-family: sans-serif; line-height: 1.6; padding: 20px; max-width: 800px; margin: auto; }
+        #question-container { margin-bottom: 20px; padding: 15px; border: 1px solid #ccc; border-radius: 5px; background-color: #f9f9f9; }
+        #options-container ul { list-style: none; padding: 0; }
+        #options-container li { margin-bottom: 10px; }
+        .option-button { display: block; width: 100%; padding: 10px; text-align: left; background-color: #eee; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; }
+        .option-button:hover { background-color: #ddd; }
+        .option-button.selected { background-color: #add8e6; border-color: #87ceeb; }
+        .option-button.correct { background-color: #90ee90; border-color: #3cb371; }
+        .option-button.incorrect { background-color: #f08080; border-color: #cd5c5c; }
+        #confidence-section { margin-top: 20px; }
+        #result { margin-top: 15px; padding: 10px; border-radius: 4px; }
+        #result.correct { background-color: #dff0d8; border: 1px solid #d6e9c6; color: #3c763d; }
+        #result.incorrect { background-color: #f2dede; border: 1px solid #ebccd1; color: #a94442; }
+        #stats-container { margin-top: 30px; padding: 15px; border: 1px solid #ddd; border-radius: 5px; background-color: #fafafa; }
+        #calibration-chart-container { margin-top: 20px; max-width: 600px; } /* Limit chart width */
+        #loading { display: none; font-style: italic; color: #555; }
+        #error-message { color: red; margin-top: 10px; font-weight: bold; }
+        .wiki-link { font-size: 0.9em; color: #555; margin-left: 5px; }
     </style>
 </head>
 <body>
-    <h1>Wikipedia Trivia Question</h1>
-    <p>Answer questions and see your session statistics and calibration curve update below.</p>
 
-    <button id="fetchButton">Get New Question</button>
-    <div id="loading">Generating question...</div>
-    <div id="error"></div> <!-- Error messages will appear here -->
+    <h1>Wikipedia Calibration Game</h1>
 
-    <!-- Question Area -->
-    <div id="question-area" style="display: none;">
-        <div id="question-text"></div>
-        <div id="options-list"></div>
-        <div id="source-title"></div>
+    <div id="game-area">
+        <button id="new-question-button">Get New Question</button>
+        <div id="loading">Loading question...</div>
+
+        <div id="question-container" style="display: none;">
+            <p id="question-text"></p>
+            <a id="wiki-link" href="#" target="_blank" class="wiki-link" style="display: none;"></a>
+            <div id="options-container">
+                <ul></ul>
+            </div>
+            <div id="confidence-section">
+                <label for="confidence">Confidence (0-100%): </label>
+                <input type="range" id="confidence" name="confidence" min="0" max="100" value="50">
+                <span id="confidence-value">50%</span>
+            </div>
+            <button id="submit-answer-button" disabled>Submit Answer</button>
+            <div id="result"></div>
+        </div>
+        <div id="error-message"></div>
     </div>
 
-    <!-- Confidence Input Area (Updated Range 0-100) -->
-    <div id="confidence-area" style="display: none;">
-         <label for="confidence-slider">Confidence (0% - 100%): <span id="confidence-value">50%</span></label>
-         <input type="range" id="confidence-slider" name="confidence" min="0" max="100" value="50">
-         <button id="submitButton" disabled>Submit Answer</button>
-    </div>
-
-    <!-- Feedback Area -->
-    <div id="feedback"></div>
-
-    <!-- Stats Area -->
-    <div id="stats-area">
+    <div id="stats-container">
         <h2>Session Statistics</h2>
-        <ul id="stats-list">
-            <li><strong>Total Questions:</strong> <span id="stats-total">0</span></li>
-            <li><strong>Correct Answers:</strong> <span id="stats-correct">0</span></li>
-            <li><strong>Accuracy (%):</strong> <span id="stats-accuracy">N/A</span></li>
-            <li><strong>Average Brier Score:</strong> <span id="stats-brier">N/A</span></li>
-            <li><small>(Lower Brier score is better)</small></li>
-        </ul>
+        <p>Questions Answered: <span id="stat-answered">0</span></p>
+        <p>Correct Answers: <span id="stat-correct">0</span> (<span id="stat-accuracy">N/A</span>%)</p>
+        <p>Average Brier Score: <span id="stat-avg-brier">N/A</span></p>
+        <div id="calibration-chart-container">
+            <canvas id="calibrationChart"></canvas>
+        </div>
     </div>
-
-    <!-- Calibration Chart Area -->
-    <div id="calibration-chart-area">
-        <h2>Calibration Curve</h2>
-        <canvas id="calibrationChart"></canvas>
-    </div>
-
 
     <script>
-        // --- Element References ---
-        const fetchButton = document.getElementById('fetchButton');
-        const questionArea = document.getElementById('question-area');
-        const questionTextEl = document.getElementById('question-text');
-        const optionsListEl = document.getElementById('options-list');
-        const sourceTitleEl = document.getElementById('source-title');
-        const loadingEl = document.getElementById('loading');
-        const errorEl = document.getElementById('error');
-        const confidenceArea = document.getElementById('confidence-area');
-        const confidenceSlider = document.getElementById('confidence-slider');
-        const confidenceValueEl = document.getElementById('confidence-value');
-        const submitButton = document.getElementById('submitButton');
-        const feedbackEl = document.getElementById('feedback');
-        const statsArea = document.getElementById('stats-area');
-        const statsTotalEl = document.getElementById('stats-total');
-        const statsCorrectEl = document.getElementById('stats-correct');
-        const statsAccuracyEl = document.getElementById('stats-accuracy');
-        const statsBrierEl = document.getElementById('stats-brier');
-        const calibrationChartArea = document.getElementById('calibration-chart-area');
+        // DOM Elements
+        const newQuestionButton = document.getElementById('new-question-button');
+        const loadingElement = document.getElementById('loading');
+        const questionContainer = document.getElementById('question-container');
+        const questionTextElement = document.getElementById('question-text');
+        const wikiLinkElement = document.getElementById('wiki-link');
+        const optionsElement = document.getElementById('options-container').querySelector('ul');
+        const confidenceSlider = document.getElementById('confidence');
+        const confidenceValueElement = document.getElementById('confidence-value');
+        const submitButton = document.getElementById('submit-answer-button');
+        const resultElement = document.getElementById('result');
+        const errorMessageElement = document.getElementById('error-message');
+        // Stats Elements
+        const statAnswered = document.getElementById('stat-answered');
+        const statCorrect = document.getElementById('stat-correct');
+        const statAccuracy = document.getElementById('stat-accuracy');
+        const statAvgBrier = document.getElementById('stat-avg-brier');
         const calibrationChartCtx = document.getElementById('calibrationChart').getContext('2d');
 
-
-        // --- State Variables ---
+        // Game State
         let currentQuestionData = null;
         let selectedAnswer = null;
+        let calibrationChart = null;
+        // Generate a simple session ID for frontend use if needed
         const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-        let calibrationChart = null; // Chart.js instance
 
+        // --- Utility Functions ---
+        function showLoading() { loadingElement.style.display = 'block'; errorMessageElement.textContent = ''; }
+        function hideLoading() { loadingElement.style.display = 'none'; }
+        function showQuestion() { questionContainer.style.display = 'block'; }
+        function hideQuestion() { questionContainer.style.display = 'none'; }
+        function displayError(message) { errorMessageElement.textContent = message; console.error("Displaying Error:", message); }
+        function clearError() { errorMessageElement.textContent = ''; }
 
-        // --- Event Listeners ---
-        confidenceSlider.addEventListener('input', () => {
-            confidenceValueEl.textContent = `${confidenceSlider.value}%`;
-        });
-        fetchButton.addEventListener('click', fetchNewQuestion);
-        submitButton.addEventListener('click', handleSubmit);
+        // --- Core Game Logic ---
 
-        // --- Initialization ---
-        document.addEventListener('DOMContentLoaded', () => {
-             confidenceValueEl.textContent = `${confidenceSlider.value}%`; // Set initial display
-             updateStatsDisplay();
-             updateCalibrationChart();
-        });
+        function fetchNewQuestion() {
+            showLoading();
+            hideQuestion();
+            clearError();
 
+            fetch('/get_trivia_question')
+                .then(response => {
+                    if (!response.ok) { // Check for HTTP errors (like 503)
+                         return response.json().then(errData => {
+                            throw new Error(errData.error || `HTTP error ${response.status}`);
+                         });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    hideLoading(); // Hide loading once data starts processing
+                    if (data.error) { // Handle logical errors returned in JSON
+                        displayError(data.error);
+                        return;
+                    }
+                    currentQuestionData = data; // Store the whole response
 
-        // --- Helper Functions ---
-        function shuffleArray(array) {
-            for (let i = array.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [array[i], array[j]] = [array[j], array[i]];
-            }
-            return array;
-        }
+                    console.log("Received data for question:", currentQuestionData); // Log received data
 
-        // --- Core Functions ---
-        async function fetchNewQuestion() {
-            // Reset UI state
-            questionArea.style.display = 'none';
-            confidenceArea.style.display = 'none';
-            feedbackEl.style.display = 'none';
-            feedbackEl.className = ''; // Reset feedback styling
-            errorEl.style.display = 'none'; // Hide previous errors
-            errorEl.textContent = '';
-            loadingEl.style.display = 'block';
-            loadingEl.textContent = "Generating question...";
-            fetchButton.disabled = true;
-            submitButton.disabled = true;
-            confidenceSlider.disabled = false;
-            confidenceSlider.value = 50; // Reset slider default value
-            confidenceValueEl.textContent = '50%'; // Reset display
-            optionsListEl.innerHTML = '';
-            currentQuestionData = null;
-            selectedAnswer = null;
+                    // Display question and source link
+                    questionTextElement.textContent = currentQuestionData.question;
+                    wikiLinkElement.href = currentQuestionData.wiki_page_url;
+                    wikiLinkElement.textContent = `(Source: ${currentQuestionData.wiki_page_title})`;
+                    wikiLinkElement.style.display = 'inline';
 
-            try {
-                const response = await fetch('/get_trivia_question');
-                loadingEl.style.display = 'none'; // Hide loading once response starts
+                    optionsElement.innerHTML = ''; // Clear previous options
 
-                if (!response.ok) {
-                    let errorMsg = `Failed to get question. Status: ${response.status}`;
-                    try { const errorData = await response.json(); errorMsg = errorData.error || errorMsg; } catch (e) {}
-                    throw new Error(errorMsg);
-                }
+                    // --- Robustly Display Options ---
+                    // Add explicit logging right before the loop
+                    console.log('Attempting to process options:', currentQuestionData.options);
+                    if (typeof currentQuestionData.options !== 'object' || currentQuestionData.options === null) {
+                         console.error('ERROR: currentQuestionData.options is not an object!', currentQuestionData.options);
+                         displayError('Received invalid question options format.');
+                         return; // Stop processing if options aren't an object
+                    }
 
-                currentQuestionData = await response.json();
+                    try { // Add try...catch around button creation
+                        const optionLetters = Object.keys(currentQuestionData.options);
+                        // Optional: Shuffle the order letters are displayed
+                        optionLetters.sort(() => Math.random() - 0.5);
 
-                // Display Question and Options
-                questionTextEl.textContent = currentQuestionData.question;
-                sourceTitleEl.textContent = `Source: ${currentQuestionData.source_title}`;
+                        optionLetters.forEach(letter => {
+                            if (currentQuestionData.options.hasOwnProperty(letter)) {
+                                const text = currentQuestionData.options[letter];
+                                const li = document.createElement('li');
+                                const button = document.createElement('button');
+                                button.textContent = `${letter}) ${text}`;
+                                button.classList.add('option-button');
+                                button.dataset.answerLetter = letter; // Store the letter
 
-                let options = [currentQuestionData.correct_answer, ...currentQuestionData.distractors];
-                options = shuffleArray(options);
+                                button.onclick = () => {
+                                    // Handle selection UI
+                                    const currentlySelected = optionsElement.querySelector('.selected');
+                                    if (currentlySelected) {
+                                        currentlySelected.classList.remove('selected');
+                                    }
+                                    button.classList.add('selected');
+                                    selectedAnswer = letter; // Store the selected letter
+                                    submitButton.disabled = confidenceSlider.value === null; // Keep disabled if slider broken? Or just enable? Let's enable.
+                                    submitButton.disabled = false;
+                                };
+                                li.appendChild(button);
+                                optionsElement.appendChild(li);
+                            }
+                        });
+                    } catch (loopError) {
+                        console.error("Error creating option buttons:", loopError);
+                        console.error("Data during error:", currentQuestionData.options); // Log data when error occurs
+                        displayError("Error displaying question options.");
+                        return; // Stop if loop fails
+                    }
+                    // --- End Robust Display ---
 
-                options.forEach(optionText => {
-                    const div = document.createElement('div');
-                    div.classList.add('option');
-                    div.textContent = optionText;
-                    div.dataset.value = optionText;
-                    div.addEventListener('click', handleOptionClick); // Attach listener here
-                    optionsListEl.appendChild(div);
+                    // Reset UI elements
+                    resultElement.textContent = '';
+                    resultElement.className = '';
+                    submitButton.disabled = true; // Disable until an option is selected
+                    confidenceSlider.value = 50;
+                    confidenceValueElement.textContent = '50%';
+                    selectedAnswer = null;
+
+                    showQuestion(); // Show the prepared question area
+                })
+                .catch(error => { // Catch fetch errors or errors thrown from response check
+                    console.error('Error fetching or processing question:', error);
+                    // Display the error message from the exception
+                    displayError(error.message || 'Failed to fetch question. Please try again.');
+                    hideLoading();
                 });
-
-                questionArea.style.display = 'block';
-                confidenceArea.style.display = 'block';
-
-            } catch (error) {
-                console.error('Error fetching question:', error);
-                errorEl.textContent = `Error: ${error.message}`;
-                errorEl.style.display = 'block'; // Show error message
-                loadingEl.style.display = 'none';
-            } finally {
-                fetchButton.disabled = false; // Always re-enable fetch button
-            }
         }
 
-        function handleOptionClick(event) {
-            const clickedOption = event.target;
-            if (clickedOption.classList.contains('disabled')) return; // Ignore clicks if disabled
-
-            const currentlySelected = optionsListEl.querySelector('.option.selected');
-            if (currentlySelected) {
-                currentlySelected.classList.remove('selected');
-            }
-
-            clickedOption.classList.add('selected');
-            selectedAnswer = clickedOption.dataset.value;
-            submitButton.disabled = false; // Enable submit only when an option is selected
-        }
-
-        async function handleSubmit() {
-            if (!selectedAnswer || !currentQuestionData) {
-                // Should not happen if button is correctly disabled, but good failsafe
-                alert("Please select an answer first.");
-                return;
-            }
+        function submitAnswer() {
+            if (!selectedAnswer) return; // Should not happen if button logic is correct
 
             const confidence = parseInt(confidenceSlider.value, 10);
-            // Disable UI elements during submission
-            submitButton.disabled = true;
-            fetchButton.disabled = true;
-            confidenceSlider.disabled = true;
-            loadingEl.textContent = "Submitting...";
-            loadingEl.style.display = 'block';
-            errorEl.style.display = 'none'; // Hide previous errors
-            feedbackEl.style.display = 'none'; // Hide previous feedback
+            showLoading(); // Indicate processing
+            clearError();
 
-            // Mark options as disabled visually
-            const allOptions = optionsListEl.querySelectorAll('.option');
-            allOptions.forEach(opt => opt.classList.add('disabled'));
+            fetch('/submit_answer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ answer: selectedAnswer, confidence: confidence })
+            })
+            .then(response => {
+                if (!response.ok) { // Check for HTTP errors
+                    return response.json().then(errData => { throw new Error(errData.error || `HTTP error ${response.status}`); });
+                }
+                return response.json();
+            })
+            .then(resultData => {
+                hideLoading();
+                if (resultData.error){
+                     displayError(resultData.error);
+                     return;
+                }
 
-            try {
-                const response = await fetch('/submit_answer', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        question: currentQuestionData.question,
-                        correct_answer: currentQuestionData.correct_answer,
-                        submitted_answer: selectedAnswer,
-                        confidence: confidence,
-                        session_id: sessionId,
-                        source_title: currentQuestionData.source_title
-                    }),
+                // Display result feedback
+                resultElement.textContent = `Result: ${resultData.result}. Correct Answer: ${resultData.correct_answer}) ${resultData.correct_answer_text}. Brier Score: ${resultData.brier_score}`;
+                resultElement.className = resultData.result; // 'correct' or 'incorrect' class
+
+                // Highlight buttons
+                const buttons = optionsElement.querySelectorAll('.option-button');
+                buttons.forEach(button => {
+                    button.disabled = true; // Disable after answering
+                    const btnLetter = button.dataset.answerLetter;
+                    if (btnLetter === resultData.correct_answer) {
+                        button.classList.add('correct');
+                    } else if (btnLetter === selectedAnswer) {
+                        button.classList.add('incorrect');
+                    }
+                     // Remove selection highlight? Optional.
+                    button.classList.remove('selected');
                 });
 
-                 loadingEl.style.display = 'none'; // Hide loading indicator
-                 const result = await response.json(); // Try to parse JSON regardless of status
+                // Update displayed stats and chart
+                updateStats(resultData.new_stats);
+                fetchCalibrationData(); // Refetch data to update chart
 
-                if (!response.ok) {
-                    // Use error message from backend if available
-                    throw new Error(result.error || `Submission failed. Status: ${response.status}`);
-                }
+                // Prepare for next question (maybe?) - or rely on user clicking button
+                hideQuestion(); // Hide answered question after showing result? Or leave it? Leave it for now.
+                // Or maybe just disable submit button again
+                submitButton.disabled = true;
 
-                // Display Feedback based on result
-                feedbackEl.style.display = 'block';
-                let feedbackText = "";
-                if (result.is_correct) {
-                    feedbackEl.className = 'feedback correct'; // Use classes for styling
-                    feedbackText = `Correct! `;
-                } else {
-                    feedbackEl.className = 'feedback incorrect';
-                    feedbackText = `Incorrect. The correct answer was: "${result.correct_answer}". `;
-                }
-                feedbackText += `Your Brier score for this question: ${result.brier_score.toFixed(3)}.`;
-                feedbackEl.textContent = feedbackText;
 
-                // Visually mark correct/incorrect answers after feedback
-                 allOptions.forEach(opt => {
-                    if(opt.dataset.value === result.correct_answer) {
-                        opt.classList.add('correct'); // Highlight correct answer green
-                    } else if (opt.classList.contains('selected') && !result.is_correct) {
-                         opt.classList.add('incorrect'); // Highlight selected wrong answer red
-                    }
-                 });
-
-                 // Update Stats and Chart after successful submission
-                 await updateStatsDisplay();
-                 await updateCalibrationChart();
-
-            } catch (error) {
+            })
+            .catch(error => {
                 console.error('Error submitting answer:', error);
-                errorEl.textContent = `Error: ${error.message}`;
-                errorEl.style.display = 'block'; // Show submission error
-                loadingEl.style.display = 'none';
-                // Consider re-enabling slider/submit on error? Or force 'Get New Question'?
-                // For now, rely on user clicking 'Get New Question'
-            } finally {
-                 fetchButton.disabled = false; // Always re-enable fetch button
-            }
+                displayError(error.message || 'Failed to submit answer.');
+                hideLoading();
+            });
         }
 
-        async function updateStatsDisplay() {
-            try {
-                const response = await fetch(`/get_stats?session_id=${sessionId}`);
-                if (!response.ok) { console.error("Stats fetch failed:", response.status); return; }
-                const stats = await response.json();
+        // --- Statistics and Charting ---
 
-                statsTotalEl.textContent = stats.total_questions;
-                statsCorrectEl.textContent = stats.correct_answers;
-                statsAccuracyEl.textContent = stats.total_questions > 0 ? `${stats.percent_correct}%` : 'N/A';
-                statsBrierEl.textContent = stats.total_questions > 0 ? `${stats.average_brier_score}` : 'N/A';
-
-                if (stats.total_questions > 0) {
-                    statsArea.style.display = 'block'; // Show stats area if there's data
-                }
-
-            } catch (error) {
-                console.error('Error updating stats:', error);
-            }
+        function updateStats(stats) {
+            statAnswered.textContent = stats.total_answered;
+            statCorrect.textContent = stats.total_correct;
+            const accuracy = stats.total_answered > 0 ? ((stats.total_correct / stats.total_answered) * 100).toFixed(1) : 'N/A';
+            statAccuracy.textContent = accuracy;
+            const avgBrier = stats.brier_scores.length > 0 ? (stats.brier_scores.reduce((a, b) => a + b, 0) / stats.brier_scores.length).toFixed(3) : 'N/A';
+            statAvgBrier.textContent = avgBrier;
         }
 
-        async function updateCalibrationChart() {
-            try {
-                const response = await fetch(`/get_calibration_data?session_id=${sessionId}`);
-                if (!response.ok) { console.error("Failed fetch calibration data:", response.status); return; }
-                const data = await response.json();
+        function fetchStats() {
+            // Use the unique session ID
+            fetch(`/get_stats?session_id=${sessionId}`) // Add session ID if needed for backend tracking later
+                .then(response => response.json())
+                .then(stats => updateStats(stats))
+                .catch(error => console.error('Error fetching stats:', error));
+        }
 
-                if (data.length === 0) { calibrationChartArea.style.display = 'none'; return; }
-                calibrationChartArea.style.display = 'block';
+         function fetchCalibrationData() {
+             // Use the unique session ID
+            fetch(`/get_calibration_data?session_id=${sessionId}`)
+                .then(response => response.json())
+                .then(data => {
+                    console.log("Calibration data received:", data); // Log data for chart
+                    renderCalibrationChart(data);
+                })
+                .catch(error => console.error('Error fetching calibration data:', error));
+        }
 
-                // Define bins for 0-100 range
-                const bins = {
-                    '0-9':   { total: 0, correct: 0, confSum: 0 }, '10-19': { total: 0, correct: 0, confSum: 0 },
-                    '20-29': { total: 0, correct: 0, confSum: 0 }, '30-39': { total: 0, correct: 0, confSum: 0 },
-                    '40-49': { total: 0, correct: 0, confSum: 0 }, '50-59': { total: 0, correct: 0, confSum: 0 },
-                    '60-69': { total: 0, correct: 0, confSum: 0 }, '70-79': { total: 0, correct: 0, confSum: 0 },
-                    '80-89': { total: 0, correct: 0, confSum: 0 }, '90-100':{ total: 0, correct: 0, confSum: 0 }
-                };
+        function renderCalibrationChart(data) {
+             const points = data.points || []; // Ensure points is an array
 
-                // Process data into bins
-                data.forEach(item => {
-                    let binKey; const conf = item.confidence;
-                    if (conf >= 0 && conf <= 9) binKey = '0-9'; else if (conf <= 19) binKey = '10-19';
-                    else if (conf <= 29) binKey = '20-29'; else if (conf <= 39) binKey = '30-39';
-                    else if (conf <= 49) binKey = '40-49'; else if (conf <= 59) binKey = '50-59';
-                    else if (conf <= 69) binKey = '60-69'; else if (conf <= 79) binKey = '70-79';
-                    else if (conf <= 89) binKey = '80-89'; else if (conf <= 100) binKey = '90-100';
-                    if (binKey) { bins[binKey].total++; bins[binKey].confSum += conf; if (item.is_correct) bins[binKey].correct++; }
-                });
+             // Prepare data for Chart.js scatter plot
+             const chartData = points.map(p => ({
+                 x: p.x, // Average confidence in bin
+                 y: p.y  // Accuracy in bin
+             }));
 
-                const userCalibrationData = [];
-                Object.values(bins).forEach(bin => {
-                     if (bin.total > 0) {
-                        const avgConfidence = bin.confSum / bin.total;
-                        const proportionCorrect = bin.correct / bin.total;
-                        userCalibrationData.push({ x: avgConfidence, y: proportionCorrect * 100 });
-                    }
-                });
-                userCalibrationData.sort((a, b) => a.x - b.x); // Sort by average confidence (x-value)
+             // Add ideal calibration line (y=x)
+             const perfectLine = [{x: 0, y: 0}, {x: 100, y: 1}]; // Plotting accuracy 0-1 vs confidence 0-100
 
-                // Recalculate point sizes based on sorted data
-                const sortedPointSizes = userCalibrationData.map(point => {
-                     let totalForecasts = 1;
-                     // Find the bin total corresponding to this point's average confidence
-                     for (const key in bins) {
-                         if (bins[key].total > 0 && Math.abs((bins[key].confSum / bins[key].total) - point.x) < 0.01) {
-                             totalForecasts = bins[key].total; break;
-                         }
-                     }
-                     return Math.max(5, Math.log(totalForecasts + 1) * 5); // Log scale size
-                 });
-
-                // Chart.js Configuration
-                const chartConfig = {
-                    type: 'line',
+             if (calibrationChart) {
+                calibrationChart.data.datasets[0].data = chartData;
+                // calibrationChart.data.datasets[1].data = perfectLine; // Update perfect line too if needed
+                calibrationChart.update();
+            } else {
+                calibrationChart = new Chart(calibrationChartCtx, {
+                    type: 'scatter',
                     data: {
-                        datasets: [{
-                                label: 'Your Calibration', data: userCalibrationData,
-                                borderColor: 'rgb(75, 192, 192)', backgroundColor: 'rgba(75, 192, 192, 0.5)',
-                                tension: 0.1, pointRadius: sortedPointSizes, pointHoverRadius: sortedPointSizes.map(r => r * 1.2), fill: false,
-                            },{
-                                label: 'Perfect Calibration', data: [ { x: 0, y: 0 }, { x: 100, y: 100 } ], // Updated range 0-100
-                                borderColor: 'rgb(0, 0, 0)', borderDash: [5, 5], pointRadius: 0, fill: false, type: 'line', tension: 0
-                            }]
+                        datasets: [
+                            {
+                                label: 'Calibration',
+                                data: chartData,
+                                backgroundColor: 'rgba(0, 0, 255, 0.6)', // Blue dots
+                                pointRadius: 5,
+                                pointHoverRadius: 7
+                            },
+                            {
+                                label: 'Perfect Calibration',
+                                data: perfectLine,
+                                type: 'line', // Draw this as a line
+                                borderColor: 'rgba(255, 0, 0, 0.5)', // Red line
+                                borderWidth: 1,
+                                pointRadius: 0, // No points on the line
+                                fill: false,
+                                tension: 0 // Straight line
+                            }
+                        ]
                     },
                     options: {
                         scales: {
-                            y: { beginAtZero: true, max: 100, title: { display: true, text: 'Actual Accuracy (%)' } },
-                            x: { type: 'linear', min: 0, max: 100, title: { display: true, text: 'Confidence (%)' } } // Updated range 0-100
+                            x: {
+                                type: 'linear',
+                                position: 'bottom',
+                                title: { display: true, text: 'Average Confidence (%)' },
+                                min: 0,
+                                max: 100
+                            },
+                            y: {
+                                title: { display: true, text: 'Accuracy' },
+                                min: 0,
+                                max: 1 // Accuracy is 0.0 to 1.0
+                            }
                         },
-                        plugins: { tooltip: {}, legend: { position: 'top' }, title: { display: true, text: 'Calibration Curve (Accuracy vs. Confidence)' } },
-                        responsive: true, maintainAspectRatio: true
+                        plugins: {
+                             tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        // Find original point data to get count if needed
+                                        const pointIndex = context.dataIndex;
+                                        const originalPoint = points[pointIndex]; // Assumes points array matches chartData array order
+                                        let label = ` Avg Confidence: ${context.parsed.x.toFixed(1)}%`;
+                                        label += `, Accuracy: ${(context.parsed.y * 100).toFixed(1)}%`;
+                                        if(originalPoint && originalPoint.count){
+                                             label += ` (Count: ${originalPoint.count})`;
+                                        }
+                                        return label;
+                                    }
+                                }
+                             }
+                        }
                     }
-                };
-
-                // Create or Update Chart
-                if (calibrationChart) { calibrationChart.data = chartConfig.data; calibrationChart.options = chartConfig.options; calibrationChart.update(); }
-                else { calibrationChart = new Chart(calibrationChartCtx, chartConfig); }
-
-            } catch (error) {
-                console.error('Error fetching/updating calibration chart:', error);
-                calibrationChartArea.style.display = 'none'; // Hide chart on error
+                });
             }
         }
 
+        // --- Event Listeners ---
+        newQuestionButton.addEventListener('click', fetchNewQuestion);
+        submitButton.addEventListener('click', submitAnswer);
+        confidenceSlider.addEventListener('input', (e) => {
+            confidenceValueElement.textContent = `${e.target.value}%`;
+        });
+
+        // Initial load
+        document.addEventListener('DOMContentLoaded', () => {
+             fetchStats();
+             fetchCalibrationData();
+             // Optionally fetch a question automatically on load?
+             // fetchNewQuestion();
+        });
+
     </script>
+
 </body>
 </html>
