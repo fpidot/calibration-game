@@ -1,8 +1,5 @@
 # app.py
 
-import sys # Keep for initial debugging if needed, can remove later
-print("Python sys.path:", sys.path) # Keep for initial debugging if needed
-
 import os
 import random
 import requests
@@ -377,4 +374,4 @@ if __name__ == '__main__':
 
     print("Starting Flask application...")
     # Use debug=False in production! Host='0.0.0.0' makes it accessible on your network.
-    app.run(debug=True, host='0.0.0.0', port=5000)flask db upgradeflask db upgrade
+app.run(debug=True, host='0.0.0.0', port=5000)
