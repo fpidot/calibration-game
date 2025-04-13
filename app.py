@@ -40,10 +40,12 @@ admin = Admin(app, name='Trivia Admin', template_mode='bootstrap3')
 admin.add_view(AppSettingAdminView(AppSetting, db.session))
 
 # --- Wikipedia API Setup ---
-# Use a specific user agent as recommended by MediaWiki API guidelines
-wiki_user_agent_contact = os.getenv('WIKI_USER_AGENT_CONTACT', 'your_email@example.com') # Optional: Add email to .env
+wiki_user_agent_contact = os.getenv('WIKI_USER_AGENT_CONTACT', 'your_email@example.com')
+# Define the user agent string separately
+WIKI_USER_AGENT = f'WikipediaTriviaGame/1.0 (https://github.com/fpidot/calibration-game; {wiki_user_agent_contact})'
+# Use the string when initializing wikipediaapi
 wiki_wiki = wikipediaapi.Wikipedia(
-    user_agent=f'WikipediaTriviaGame/1.0 (https://github.com/fpidot/calibration-game; {wiki_user_agent_contact})',
+    user_agent=WIKI_USER_AGENT,
     language='en'
 )
 
@@ -109,7 +111,7 @@ def get_wikipedia_page(strategy, keywords_str, categories_str, limit):
                     S = requests.Session()
                     URL = "https://en.wikipedia.org/w/api.php"
                     PARAMS = {"action": "query","format": "json","list": "search","srsearch": keyword,"srnamespace": "0","srlimit": limit,"srwhat": "text"}
-                    headers = {'User-Agent': wiki_wiki.user_agent}
+                    headers = {'User-Agent': WIKI_USER_AGENT}
                     R = S.get(url=URL, params=PARAMS, headers=headers)
                     R.raise_for_status(); data = R.json()
                     search_results = data.get("query", {}).get("search", [])
@@ -128,7 +130,7 @@ def get_wikipedia_page(strategy, keywords_str, categories_str, limit):
                     print(f"Fetching members for category: {category_name}")
                     S = requests.Session(); URL = "https://en.wikipedia.org/w/api.php"
                     PARAMS = {"action": "query","format": "json","list": "categorymembers","cmtitle": category_name,"cmlimit": limit,"cmtype": "page","cmprop": "title"}
-                    headers = {'User-Agent': wiki_wiki.user_agent}
+                    headers = {'User-Agent': WIKI_USER_AGENT}
                     R = S.get(url=URL, params=PARAMS, headers=headers)
                     R.raise_for_status(); data = R.json()
                     members = data.get("query", {}).get("categorymembers", [])
@@ -140,7 +142,7 @@ def get_wikipedia_page(strategy, keywords_str, categories_str, limit):
                 print("Using random strategy or falling back to random.")
                 S = requests.Session(); URL = "https://en.wikipedia.org/w/api.php"
                 PARAMS = {"action": "query","format": "json","list": "random","rnnamespace": "0","rnlimit": "1"}
-                headers = {'User-Agent': wiki_wiki.user_agent}
+                headers = {'User-Agent': WIKI_USER_AGENT}
                 R = S.get(url=URL, params=PARAMS, headers=headers)
                 R.raise_for_status(); data = R.json()
                 random_pages = data.get("query", {}).get("random", [])
@@ -184,28 +186,81 @@ Text:
 """
     try:
         response = model.generate_content(prompt)
-        content = response.text.strip(); lines = content.split('\n')
-        question = None; options = {}; correct_answer_letter = None
-        if len(lines) >= 6:
-            if lines[0].startswith("Question:"): question = lines[0][len("Question:"):].strip()
-            possible_options = lines[1:5]; option_prefixes = ['A)', 'B)', 'C)', 'D)']
-            temp_options = {}; valid_options = True
-            for i, line in enumerate(possible_options):
-                prefix = option_prefixes[i]
-                if line.startswith(prefix): temp_options[prefix[0]] = line[len(prefix):].strip()
-                else: valid_options = False; print(f"Parsing Error: Option line '{line}' doesn't start with '{prefix}'."); break
-            if valid_options and len(temp_options) == 4: options = temp_options
-            if lines[5].startswith("Correct Answer:"):
-                 correct_answer_letter = lines[5][len("Correct Answer:"):].strip().upper()
-                 if correct_answer_letter not in options: print(f"Parsing Error: Correct Answer letter '{correct_answer_letter}' not in options keys."); correct_answer_letter = None
+
+        # --- Robust Parsing ---
+        content = response.text.strip()
+        # Filter out empty lines AFTER splitting
+        lines = [line.strip() for line in content.split('\n') if line.strip()] # <-- Filter empty lines
+
+        question = None
+        options = {}
+        correct_answer_letter = None
+        correct_answer_line_index = -1 # Keep track of where Correct Answer line is
+
+        if not lines:
+             print("Parsing Error: No non-empty lines found in Gemini response.")
+             return None, None, None
+
+        # Find the Question line
+        if lines[0].startswith("Question:"):
+            question = lines[0][len("Question:"):].strip()
+        else:
+            print(f"Parsing Error: First line doesn't start with 'Question:'. Line: '{lines[0]}'")
+            return None, None, None # Expect Question first
+
+        # Find the Options (expecting 4 lines starting with A), B), C), D) after Question)
+        option_prefixes = ['A)', 'B)', 'C)', 'D)']
+        temp_options = {}
+        option_lines_found = 0
+        # Start searching from the line *after* the question
+        current_line_index = 1
+        while option_lines_found < 4 and current_line_index < len(lines):
+             line = lines[current_line_index]
+             expected_prefix = option_prefixes[option_lines_found]
+             if line.startswith(expected_prefix):
+                 temp_options[expected_prefix[0]] = line[len(expected_prefix):].strip()
+                 option_lines_found += 1
+             # Allow skipping lines that don't match expected option format
+             # else:
+             #     print(f"Debug: Skipping line '{line}', expecting '{expected_prefix}'")
+             current_line_index += 1
+
+        if option_lines_found == 4:
+             options = temp_options
+        else:
+             print(f"Parsing Error: Didn't find all 4 options (A, B, C, D). Found {option_lines_found}.")
+             # Log received lines for debugging
+             print("Received lines for parsing:", lines)
+             return None, None, None # Expect 4 options
+
+        # Find the Correct Answer line (can appear after options)
+        # current_line_index now points to the line *after* the last processed line (likely after D)
+        while current_line_index < len(lines):
+            line = lines[current_line_index]
+            if line.startswith("Correct Answer:"):
+                correct_answer_letter = line[len("Correct Answer:"):].strip().upper()
+                # Validate the letter is one of the options
+                if correct_answer_letter not in options:
+                    print(f"Parsing Error: Correct Answer letter '{correct_answer_letter}' not in parsed options keys {list(options.keys())}.")
+                    correct_answer_letter = None # Invalidate
+                break # Found the correct answer line
+            current_line_index += 1 # Move to next line
+
+        if not correct_answer_letter:
+             print("Parsing Error: 'Correct Answer:' line not found or letter invalid after options.")
+             print("Received lines for parsing:", lines)
+             return None, None, None
+
+        # Final Check: Ensure we have everything needed
         if not all([question, options, correct_answer_letter]):
-            print(f"Error: Failed to parse Gemini response reliably. Response:\n---\n{content}\n---")
+            print(f"Error: Failed final check after parsing Gemini response.")
             return None, None, None
+
         print("Successfully parsed Gemini response.")
         return question, options, correct_answer_letter
+
     except Exception as e:
         print(f"Error generating question or parsing response with Gemini: {e}")
-        # Consider logging response.prompt_feedback or other details if available
         return None, None, None
 
 def calculate_brier_score(confidence, is_correct):
@@ -338,6 +393,88 @@ def submit_answer():
         "brier_score": round(brier_score, 3),
         "new_stats": session['stats']
     })
+
+@app.route('/get_stats')
+def get_stats():
+    """Returns the current session statistics."""
+    # Ensure stats exist in session, providing defaults if not
+    if 'stats' not in session:
+        session['stats'] = {'total_answered': 0, 'total_correct': 0, 'brier_scores': [], 'confidence_levels': [], 'correctness': []}
+        for key in ['brier_scores', 'confidence_levels', 'correctness']: # Ensure lists exist
+             if key not in session['stats']: session['stats'][key] = []
+        session.modified = True
+    return jsonify(session['stats'])
+
+@app.route('/get_calibration_data')
+def get_calibration_data():
+    """Returns data formatted for the calibration chart."""
+    if 'stats' not in session or not session['stats']['confidence_levels']:
+        return jsonify({"bins": [], "accuracy": [], "count": []}) # Return empty data if no stats
+
+    stats = session['stats']
+    confidence_levels = stats['confidence_levels']
+    correctness = stats['correctness'] # List of booleans
+
+    # Group data into bins (e.g., 0-10, 11-20, ..., 91-100)
+    # Or maybe simpler 10% bins: 0-9, 10-19, ... 90-100
+    num_bins = 10
+    bins = [[] for _ in range(num_bins)]
+    counts = [0] * num_bins
+    correct_counts = [0] * num_bins
+
+    for conf, correct in zip(confidence_levels, correctness):
+        if conf == 100: # Put 100 in the last bin
+            bin_index = num_bins - 1
+        else:
+            bin_index = conf // (100 // num_bins) # e.g., 75 // 10 = 7 -> bin index 7 (70-79)
+
+        # Simple binning by 10s (0-9, 10-19, ..., 90-100)
+        #bin_index = min(conf // 10, num_bins - 1)
+
+        counts[bin_index] += 1
+        if correct:
+            correct_counts[bin_index] += 1
+
+    # Calculate accuracy for each bin (avoid division by zero)
+    accuracy = [
+        (correct_counts[i] / counts[i]) if counts[i] > 0 else 0
+        for i in range(num_bins)
+    ]
+
+    # Prepare bin labels for the chart (e.g., "0-10%", "10-20%", ...)
+    bin_labels = [f"{i * (100 // num_bins)}-{(i + 1) * (100 // num_bins)}%" for i in range(num_bins)]
+    # Adjust last label for 90-100% or similar depending on exact binning
+    bin_labels[-1] = f"{ (num_bins - 1) * (100 // num_bins) }-100%"
+
+
+    # Return data in a format Chart.js can use
+    # We need average confidence *within* each bin, and accuracy *for* that bin
+    # Let's recalculate slightly for a better plot: plot accuracy vs average confidence per bin
+
+    avg_confidence_per_bin = [0] * num_bins
+    for conf, correct in zip(confidence_levels, correctness):
+         if conf == 100: bin_index = num_bins - 1
+         else: bin_index = conf // (100 // num_bins)
+         avg_confidence_per_bin[bin_index] += conf
+
+    # Calculate average confidence only for bins with data
+    for i in range(num_bins):
+        if counts[i] > 0:
+            avg_confidence_per_bin[i] /= counts[i]
+        else:
+            avg_confidence_per_bin[i] = (i * (100 // num_bins) + (i + 1) * (100 // num_bins)) / 2 # Estimate center if empty
+
+
+    # Data for Chart.js: plot points (average_confidence, accuracy) for each bin
+    chart_data = {
+        'points': [
+            {'x': avg_confidence_per_bin[i], 'y': accuracy[i], 'count': counts[i]}
+            for i in range(num_bins) if counts[i] > 0 # Only include bins with data
+        ]
+        # 'labels': bin_labels # Could also send labels if needed by chart
+    }
+
+    return jsonify(chart_data)
 
 # --- Main Execution & DB Initialization ---
 if __name__ == '__main__':
