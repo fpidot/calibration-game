@@ -392,7 +392,13 @@ if __name__ == '__main__':
             'page_selection_strategy': ('random', 'Method to select Wikipedia pages (random, search, category)'),
             'search_keywords': ('History, Science, Technology, Art, Geography, Culture, Philosophy, Sports', 'Comma-separated keywords for search strategy'),
             'target_categories': ('Physics, World_War_II, Cities_in_France, Mammals, Programming_languages', 'Comma-separated categories for category strategy (no "Category:" prefix)'),
-            'api_result_limit': ('20', 'Max results to fetch/consider from search/category API calls')
+            'api_result_limit': ('20', 'Max results to fetch/consider from search/category API calls'),
+            # --- ADD SCORING PARAMETERS ---
+            'score_base_correct': ('10', 'Base points for correct answer at 0% confidence'),
+            'score_mult_correct': ('0.9', 'Additional points per confidence % for correct answer (e.g., 0.9*conf)'),
+            'score_base_incorrect': ('-100', 'Base points (penalty) for incorrect answer at 100% confidence'),
+            'score_mult_incorrect': ('0.9', 'Reduction in penalty per confidence % *below* 100 for incorrect answer (e.g., base + 0.9*(100-conf))')
+            # --- END ADD ---
         }
         added_defaults = False
         for key, (value, desc) in defaults.items():

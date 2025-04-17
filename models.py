@@ -60,6 +60,7 @@ class Response(db.Model):
     user_confidence = db.Column(db.Integer, nullable=True) # Storing 0-100
     is_correct = db.Column(db.Boolean, nullable=True)
     brier_score = db.Column(db.Float, nullable=True)
+    points_awarded = db.Column(db.Float, nullable=True) # Store score as float
     timestamp = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     def __repr__(self):
