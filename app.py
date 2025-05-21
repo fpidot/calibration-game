@@ -270,15 +270,17 @@ def get_trivia_question():
     print(f"Sending question to client: {question}")
     return jsonify({'question': question, 'options': options, 'wiki_page_title': wiki_page_title, 'wiki_page_url': wiki_page_url})
 
+# Inside app.py
+
 @app.route('/submit_answer', methods=['POST'])
 def submit_answer():
     data = request.get_json()
     user_answer_letter = data.get('answer')
-    user_confidence = data.get('confidence')
+    user_confidence = data.get('confidence') # Expecting 0-100 integer
 
+    # ... (validation for active question, missing data, confidence range) ...
     if 'current_question' not in session: return jsonify({"error": "No active question found in session."}), 400
     if user_answer_letter is None or user_confidence is None: return jsonify({"error": "Missing answer or confidence."}), 400
-
     try:
         user_confidence = int(user_confidence);
         if not (0 <= user_confidence <= 100): raise ValueError("Confidence out of range")
@@ -288,42 +290,76 @@ def submit_answer():
     correct_answer_letter = current_q['correct_answer_letter']
     correct_answer_text = current_q['options'].get(correct_answer_letter)
     is_correct = (user_answer_letter == correct_answer_letter)
+
+    # Calculate Brier score
     brier_score = calculate_brier_score(user_confidence, is_correct)
 
+    # --- Calculate Gamified Score ---
+    points = 0.0
+    try:
+        # Fetch scoring parameters (provide defaults in case settings are missing)
+        base_correct = get_setting('score_base_correct', 10.0) # Use float defaults
+        mult_correct = get_setting('score_mult_correct', 0.9)
+        base_incorrect = get_setting('score_base_incorrect', -100.0) # Negative base penalty
+        mult_incorrect = get_setting('score_mult_incorrect', 0.9) # Positive multiplier for reduction
+
+        if is_correct:
+            # Score = Base + Bonus for confidence
+            points = base_correct + (mult_correct * user_confidence)
+        else:
+            # Score = Base Penalty + Reduction based on *lack* of confidence
+            # Penalty is highest at 100 conf, lowest at 0 conf
+            points = base_incorrect + (mult_incorrect * (100 - user_confidence))
+
+        points = round(points, 2) # Round to 2 decimal places
+        print(f"Calculated score: {points}") # Debug log
+
+    except Exception as e:
+        print(f"Error calculating score: {e}")
+        points = 0.0 # Default to 0 if calculation fails
+    # --- End Score Calculation ---
+
+
+    # Update session statistics (Brier, counts, etc.)
+    # ... (session stats update logic remains the same) ...
     if 'stats' not in session: # Initialize just in case
         session['stats'] = {'total_answered': 0, 'total_correct': 0, 'brier_scores': [], 'confidence_levels': [], 'correctness': []}
         for key in ['brier_scores', 'confidence_levels', 'correctness']:
              if key not in session['stats']: session['stats'][key] = []
-
     session['stats']['total_answered'] += 1
     if is_correct: session['stats']['total_correct'] += 1
     session['stats']['brier_scores'].append(brier_score)
     session['stats']['confidence_levels'].append(user_confidence)
     session['stats']['correctness'].append(is_correct)
 
+
+    # Store response in database
     try:
         response_entry = Response(
             session_id=session.sid if hasattr(session, 'sid') else request.remote_addr,
             wiki_page_title=current_q['title'], question_text=current_q['question'],
             answer_options=str(current_q['options']), correct_answer=correct_answer_letter,
             user_answer=user_answer_letter, user_confidence=user_confidence,
-            is_correct=is_correct, brier_score=brier_score
+            is_correct=is_correct, brier_score=brier_score,
+            points_awarded=points # <-- Save calculated points
         )
         db.session.add(response_entry)
         db.session.commit()
-        print(f"Response saved to DB. ID: {response_entry.id}")
+        print(f"Response saved to DB. ID: {response_entry.id}, Points: {points}")
     except Exception as e:
-        db.session.rollback()
-        print(f"Error saving response to database: {e}")
-        flash("Error saving response to database.", "error") # Inform admin maybe?
+        db.session.rollback(); print(f"Error saving response to database: {e}")
+        # Maybe flash("Error saving response to database.", "error")
 
     session.pop('current_question', None)
     session.modified = True
 
+    # Return results, including points
     return jsonify({
         "result": "correct" if is_correct else "incorrect",
-        "correct_answer": correct_answer_letter, "correct_answer_text": correct_answer_text,
+        "correct_answer": correct_answer_letter,
+        "correct_answer_text": correct_answer_text,
         "brier_score": round(brier_score, 3),
+        "points_awarded": points, # <-- Add points to response
         "new_stats": session['stats']
     })
 

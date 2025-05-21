@@ -221,9 +221,17 @@
                 }
 
                 // Display result feedback
-                resultElement.textContent = `Result: ${resultData.result}. Correct Answer: ${resultData.correct_answer}) ${resultData.correct_answer_text}. Brier Score: ${resultData.brier_score}`;
+                let feedbackText = `Result: ${resultData.result}. Correct Answer: ${resultData.correct_answer}) ${resultData.correct_answer_text}.`;
+                feedbackText += ` Brier Score: ${resultData.brier_score}.`;
+                // --- ADD POINTS DISPLAY ---
+                if (resultData.points_awarded !== undefined && resultData.points_awarded !== null) {
+                     feedbackText += ` Points: ${resultData.points_awarded.toFixed(1)}`; // Display points
+                }
+                console.log("Final feedbackText to be displayed:", feedbackText);
+                console.log("resultData object:", JSON.stringify(resultData, null, 2)); // Log the full resultData
+                resultElement.textContent = feedbackText;
                 resultElement.className = resultData.result; // 'correct' or 'incorrect' class
-
+                showQuestion();
                 // Highlight buttons
                 const buttons = optionsElement.querySelectorAll('.option-button');
                 buttons.forEach(button => {
@@ -243,7 +251,7 @@
                 fetchCalibrationData(); // Refetch data to update chart
 
                 // Prepare for next question (maybe?) - or rely on user clicking button
-                hideQuestion(); // Hide answered question after showing result? Or leave it? Leave it for now.
+                // hideQuestion(); // Hide answered question after showing result? Or leave it? Leave it for now.
                 // Or maybe just disable submit button again
                 submitButton.disabled = true;
 
