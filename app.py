@@ -1,4 +1,4 @@
-# app.py
+# app.py (as retrieved from https://github.com/fpidot/calibration-game/blob/main/app.py)
 
 import os
 import random
@@ -25,6 +25,7 @@ migrate = Migrate(app, db) # Setup Flask-Migrate
 
 # --- Database Models ---
 # Import specific models AFTER db is initialized with app
+# This import should now work because models.py exists and db is handled correctly
 from models import Response, AppSetting
 
 # --- Admin Setup ---
@@ -70,12 +71,12 @@ def get_setting(key, default_value):
                 if val in ('true', '1'): return True
                 elif val in ('false', '0'): return False
                 else:
-                    print(f"Warning: Non-boolean value '{setting.setting_value}' found for bool setting '{key}'. Using default.")
+                    # print(f"Warning: Non-boolean value '{setting.setting_value}' found for bool setting '{key}'. Using default.")
                     return default_value
             else: # Works for int, float, str
                 return value_type(setting.setting_value)
         except (ValueError, TypeError) as e:
-            print(f"Warning: Could not convert value '{setting.setting_value}' for setting '{key}' to type {value_type}. Error: {e}. Using default.")
+            # print(f"Warning: Could not convert value '{setting.setting_value}' for setting '{key}' to type {value_type}. Error: {e}. Using default.")
             return default_value
     return default_value
 
@@ -125,7 +126,7 @@ def get_wikipedia_page(strategy, keywords_str, categories_str, limit):
                         selected_title = random.choice(members)['title']
                         print(f"Selected '{selected_title}' from category members.")
                     else: print(f"No page members found in category '{category_name}'. Retrying strategy."); continue
-            if current_strategy == 'random' or (selected_title is None and current_strategy != 'random'):
+            if current_strategy == 'random' or (selected_title is None and current_strategy != 'random'): # Corrected logic for fallback
                 print("Using random strategy or falling back to random.")
                 S = requests.Session(); URL = "https://en.wikipedia.org/w/api.php"
                 PARAMS = {"action": "query","format": "json","list": "random","rnnamespace": "0","rnlimit": "1"}
@@ -193,7 +194,8 @@ Text:
         else: print(f"Parsing Error: Didn't find all 4 options (A, B, C, D). Found {option_lines_found}. Lines: {lines}"); return None, None, None
 
         found_correct_line = False
-        while current_line_index < len(lines):
+        # current_line_index should point to the line after the last option line processed, or the end of lines.
+        while current_line_index < len(lines): # Search remaining lines for "Correct Answer:"
             line = lines[current_line_index]
             if line.startswith("Correct Answer:"):
                 correct_answer_letter = line[len("Correct Answer:"):].strip().upper()
@@ -219,11 +221,24 @@ def calculate_brier_score(confidence, is_correct):
 @app.route('/')
 def index():
     if 'stats' not in session:
-        session['stats'] = {'total_answered': 0, 'total_correct': 0, 'brier_scores': [], 'confidence_levels': [], 'correctness': []}
+        session['stats'] = {
+            'total_answered': 0,
+            'total_correct': 0,
+            'brier_scores': [],
+            'confidence_levels': [],
+            'correctness': [],
+            'cumulative_score': 0.0, # Current game's score
+            'questions_this_game': 0  # <-- Initialize questions for current game
+        }
+    # Ensure all keys exist, especially after adding a new one
     for key in ['brier_scores', 'confidence_levels', 'correctness']:
         if key not in session['stats']: session['stats'][key] = []
+    if 'cumulative_score' not in session['stats']:
+        session['stats']['cumulative_score'] = 0.0
+    if 'questions_this_game' not in session['stats']: # <-- Add check for this
+        session['stats']['questions_this_game'] = 0
     session.modified = True
-    return render_template('index.html', stats=session['stats']) # Pass stats for potential initial render
+    return render_template('index.html', stats=session['stats']) # Pass initial stats
 
 @app.route('/get_trivia_question', methods=['GET'])
 def get_trivia_question():
@@ -245,7 +260,7 @@ def get_trivia_question():
         generation_attempt += 1
         print(f"\nOverall Generation Attempt {generation_attempt}/{MAX_GENERATION_ATTEMPTS}")
         page = get_wikipedia_page(page_selection_strategy, search_keywords, target_categories, api_result_limit)
-        if not page: print("Failed to get suitable page in get_wikipedia_page. Aborting this attempt."); continue
+        if not page: print("Failed to get suitable page in get_wikipedia_page. Continuing to next attempt if any."); continue # Modified to continue loop
 
         wiki_page_title = page.title; wiki_page_url = page.fullurl
         summary = page.summary
@@ -256,7 +271,7 @@ def get_trivia_question():
 
         question, options, correct_answer = generate_question_from_text(summary, gemini_context_length)
         if question and options and correct_answer: print(f"Successfully generated question for '{wiki_page_title}'."); break
-        else: print(f"Failed to generate valid Q&A from summary of '{wiki_page_title}'. Trying new page."); page = None; continue
+        else: print(f"Failed to generate valid Q&A from summary of '{wiki_page_title}'. Trying new page."); page = None; # Continue to next attempt to get a page
 
     if not (page and question and options and correct_answer):
         print(f"Failed to generate a question after {MAX_GENERATION_ATTEMPTS} attempts.")
@@ -270,17 +285,15 @@ def get_trivia_question():
     print(f"Sending question to client: {question}")
     return jsonify({'question': question, 'options': options, 'wiki_page_title': wiki_page_title, 'wiki_page_url': wiki_page_url})
 
-# Inside app.py
-
 @app.route('/submit_answer', methods=['POST'])
 def submit_answer():
     data = request.get_json()
     user_answer_letter = data.get('answer')
-    user_confidence = data.get('confidence') # Expecting 0-100 integer
+    user_confidence = data.get('confidence')
 
-    # ... (validation for active question, missing data, confidence range) ...
     if 'current_question' not in session: return jsonify({"error": "No active question found in session."}), 400
     if user_answer_letter is None or user_confidence is None: return jsonify({"error": "Missing answer or confidence."}), 400
+
     try:
         user_confidence = int(user_confidence);
         if not (0 <= user_confidence <= 100): raise ValueError("Confidence out of range")
@@ -290,119 +303,141 @@ def submit_answer():
     correct_answer_letter = current_q['correct_answer_letter']
     correct_answer_text = current_q['options'].get(correct_answer_letter)
     is_correct = (user_answer_letter == correct_answer_letter)
-
-    # Calculate Brier score
     brier_score = calculate_brier_score(user_confidence, is_correct)
 
-    # --- Calculate Gamified Score ---
     points = 0.0
     try:
-        # Fetch scoring parameters (provide defaults in case settings are missing)
-        base_correct = get_setting('score_base_correct', 10.0) # Use float defaults
-        mult_correct = get_setting('score_mult_correct', 0.9)
-        base_incorrect = get_setting('score_base_incorrect', -100.0) # Negative base penalty
-        mult_incorrect = get_setting('score_mult_incorrect', 0.9) # Positive multiplier for reduction
+        base_correct = float(get_setting('score_base_correct', 10.0))
+        mult_correct = float(get_setting('score_mult_correct', 0.9))
+        base_incorrect = float(get_setting('score_base_incorrect', -100.0))
+        mult_incorrect = float(get_setting('score_mult_incorrect', 0.9))
 
         if is_correct:
-            # Score = Base + Bonus for confidence
             points = base_correct + (mult_correct * user_confidence)
         else:
-            # Score = Base Penalty + Reduction based on *lack* of confidence
-            # Penalty is highest at 100 conf, lowest at 0 conf
             points = base_incorrect + (mult_incorrect * (100 - user_confidence))
-
-        points = round(points, 2) # Round to 2 decimal places
-        print(f"Calculated score: {points}") # Debug log
-
+        points = round(points, 2)
+        print(f"Calculated score: {points}")
     except Exception as e:
-        print(f"Error calculating score: {e}")
-        points = 0.0 # Default to 0 if calculation fails
-    # --- End Score Calculation ---
+        print(f"Error calculating score: {e}"); points = 0.0
+
+    if 'stats' not in session: # Defensive initialization
+        session['stats'] = {
+            'total_answered': 0, 'total_correct': 0, 'brier_scores': [],
+            'confidence_levels': [], 'correctness': [],
+            'cumulative_score': 0.0, 'questions_this_game': 0
+        }
+    # Ensure specific keys exist before incrementing
+    if 'cumulative_score' not in session['stats']: session['stats']['cumulative_score'] = 0.0
+    if 'questions_this_game' not in session['stats']: session['stats']['questions_this_game'] = 0
 
 
-    # Update session statistics (Brier, counts, etc.)
-    # ... (session stats update logic remains the same) ...
-    if 'stats' not in session: # Initialize just in case
-        session['stats'] = {'total_answered': 0, 'total_correct': 0, 'brier_scores': [], 'confidence_levels': [], 'correctness': []}
-        for key in ['brier_scores', 'confidence_levels', 'correctness']:
-             if key not in session['stats']: session['stats'][key] = []
-    session['stats']['total_answered'] += 1
-    if is_correct: session['stats']['total_correct'] += 1
+    session['stats']['total_answered'] += 1 # This can be overall total
+    if is_correct:
+        session['stats']['total_correct'] += 1 # Overall total
     session['stats']['brier_scores'].append(brier_score)
     session['stats']['confidence_levels'].append(user_confidence)
     session['stats']['correctness'].append(is_correct)
+    session['stats']['cumulative_score'] += points
+    session['stats']['cumulative_score'] = round(session['stats']['cumulative_score'], 2)
+    session['stats']['questions_this_game'] += 1
+    # --- CHECK FOR GAME END ---
+    game_length = int(get_setting('game_length', 20)) # Fetch from AppSetting
+    end_of_game = False
+    if session['stats']['questions_this_game'] >= game_length:
+        end_of_game = True
+        # Optionally, you could do something specific here, like log game completion,
+        # but the main action is sending the flag to the frontend.
+        # The session reset for a new game will be handled by a "Play Again" action.
+        print(f"Game ended. Questions: {session['stats']['questions_this_game']}, Score: {session['stats']['cumulative_score']}")
+    # --- END CHECK ---
 
-
-    # Store response in database
     try:
         response_entry = Response(
             session_id=session.sid if hasattr(session, 'sid') else request.remote_addr,
             wiki_page_title=current_q['title'], question_text=current_q['question'],
             answer_options=str(current_q['options']), correct_answer=correct_answer_letter,
             user_answer=user_answer_letter, user_confidence=user_confidence,
-            is_correct=is_correct, brier_score=brier_score,
-            points_awarded=points # <-- Save calculated points
+            is_correct=is_correct, brier_score=brier_score, points_awarded=points
         )
         db.session.add(response_entry)
         db.session.commit()
         print(f"Response saved to DB. ID: {response_entry.id}, Points: {points}")
     except Exception as e:
         db.session.rollback(); print(f"Error saving response to database: {e}")
-        # Maybe flash("Error saving response to database.", "error")
+        # flash("Error saving response to database.", "error")
 
     session.pop('current_question', None)
     session.modified = True
 
-    # Return results, including points
     return jsonify({
         "result": "correct" if is_correct else "incorrect",
-        "correct_answer": correct_answer_letter,
-        "correct_answer_text": correct_answer_text,
+        "correct_answer": correct_answer_letter, "correct_answer_text": correct_answer_text,
         "brier_score": round(brier_score, 3),
-        "points_awarded": points, # <-- Add points to response
-        "new_stats": session['stats']
+        "points_awarded": points,
+        "new_stats": session['stats'],
+        "end_of_game": end_of_game 
     })
 
 @app.route('/get_stats')
 def get_stats():
     """Returns the current session statistics."""
     if 'stats' not in session:
-        session['stats'] = {'total_answered': 0, 'total_correct': 0, 'brier_scores': [], 'confidence_levels': [], 'correctness': []}
-        for key in ['brier_scores', 'confidence_levels', 'correctness']:
-             if key not in session['stats']: session['stats'][key] = []
-        session.modified = True
-    # print(f"Returning stats: {session['stats']}") # Debug log if needed
-    return jsonify(session['stats'])
+        session['stats'] = {
+            'total_answered': 0, 'total_correct': 0,
+            'brier_scores': [], 'confidence_levels': [], 'correctness': [],
+            'cumulative_score': 0.0,
+            'questions_this_game': 0 # <-- Initialize
+        }
+    for key in ['brier_scores', 'confidence_levels', 'correctness']:
+        if key not in session['stats']: session['stats'][key] = []
+    if 'cumulative_score' not in session['stats']:
+        session['stats']['cumulative_score'] = 0.0
+    if 'questions_this_game' not in session['stats']: # <-- Add check
+        session['stats']['questions_this_game'] = 0
+    session.modified = True
+    current_stats = session['stats'].copy() # Work with a copy
+    current_stats['game_length_setting'] = int(get_setting('game_length', 20))
+    return jsonify(current_stats)
+
+@app.route('/start_new_game', methods=['POST'])
+def start_new_game():
+    # Reset game-specific stats in the session
+    session['stats']['cumulative_score'] = 0.0
+    session['stats']['questions_this_game'] = 0
+    # Potentially reset brier_scores, confidence_levels, correctness if they are per-game
+    # For now, let's assume they are session-lifetime stats, or reset them too:
+    session['stats']['brier_scores'] = []
+    session['stats']['confidence_levels'] = []
+    session['stats']['correctness'] = []
+    # Total answered and correct can be overall, or you can reset them too if a "game" is distinct.
+    # Let's keep total_answered and total_correct as overall session stats for now.
+
+    session.modified = True
+    print("New game started, session stats reset for game-specific items.")
+    # Return the freshly reset stats
+    return jsonify({"status": "success", "new_stats": session['stats']})
 
 @app.route('/get_calibration_data')
 def get_calibration_data():
     """Returns data formatted for the calibration chart."""
     if 'stats' not in session or not session['stats'].get('confidence_levels'):
-        # print("No stats or confidence levels in session for calibration.") # Debug log
-        return jsonify({"points": []}) # Return empty data structure expected by chart
+        return jsonify({"points": []})
 
     stats = session['stats']
     confidence_levels = stats['confidence_levels']
     correctness = stats['correctness']
-
-    num_bins = 10
-    counts = [0] * num_bins
-    correct_counts = [0] * num_bins
+    num_bins = 10; counts = [0] * num_bins; correct_counts = [0] * num_bins
     sum_confidence_per_bin = [0.0] * num_bins
 
-    if not confidence_levels: # Extra check if lists are empty
-        return jsonify({"points": []})
+    if not confidence_levels: return jsonify({"points": []})
 
     for conf, correct in zip(confidence_levels, correctness):
-        conf = int(conf) # Ensure confidence is integer
-        if conf < 0 or conf > 100: continue # Skip invalid confidence values
-
-        bin_index = min(conf // (100 // num_bins), num_bins - 1) # Handle 100% correctly
-
-        counts[bin_index] += 1
-        sum_confidence_per_bin[bin_index] += conf
-        if correct:
-            correct_counts[bin_index] += 1
+        conf = int(conf)
+        if conf < 0 or conf > 100: continue
+        bin_index = min(conf // (100 // num_bins), num_bins - 1)
+        counts[bin_index] += 1; sum_confidence_per_bin[bin_index] += conf
+        if correct: correct_counts[bin_index] += 1
 
     chart_points = []
     for i in range(num_bins):
@@ -410,8 +445,6 @@ def get_calibration_data():
             avg_confidence = sum_confidence_per_bin[i] / counts[i]
             accuracy = correct_counts[i] / counts[i]
             chart_points.append({'x': avg_confidence, 'y': accuracy, 'count': counts[i]})
-
-    # print(f"Returning calibration data points: {chart_points}") # Debug log
     return jsonify({'points': chart_points})
 
 # --- Main Execution & DB Initialization ---
@@ -429,12 +462,11 @@ if __name__ == '__main__':
             'search_keywords': ('History, Science, Technology, Art, Geography, Culture, Philosophy, Sports', 'Comma-separated keywords for search strategy'),
             'target_categories': ('Physics, World_War_II, Cities_in_France, Mammals, Programming_languages', 'Comma-separated categories for category strategy (no "Category:" prefix)'),
             'api_result_limit': ('20', 'Max results to fetch/consider from search/category API calls'),
-            # --- ADD SCORING PARAMETERS ---
             'score_base_correct': ('10', 'Base points for correct answer at 0% confidence'),
             'score_mult_correct': ('0.9', 'Additional points per confidence % for correct answer (e.g., 0.9*conf)'),
             'score_base_incorrect': ('-100', 'Base points (penalty) for incorrect answer at 100% confidence'),
-            'score_mult_incorrect': ('0.9', 'Reduction in penalty per confidence % *below* 100 for incorrect answer (e.g., base + 0.9*(100-conf))')
-            # --- END ADD ---
+            'score_mult_incorrect': ('0.9', 'Reduction in penalty per confidence % *below* 100 for incorrect answer (e.g., base + 0.9*(100-conf))'),
+            'game_length': ('20', 'Number of questions per game session (e.g., 20)')
         }
         added_defaults = False
         for key, (value, desc) in defaults.items():
