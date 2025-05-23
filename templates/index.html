@@ -8,6 +8,19 @@
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <style>
         body { font-family: sans-serif; line-height: 1.6; padding: 20px; max-width: 800px; margin: auto; }
+        .hidden { display: none !important; } 
+        #nickname-setup-area, #pre-game-options { 
+            margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; 
+            border-radius: 5px; background-color: #f0f0f0; 
+        }
+        #nickname-setup-area label, #pre-game-options label { 
+            display: block; margin-top: 10px; margin-bottom: 5px; font-weight: bold;
+        }
+        #nickname-setup-area input[type="text"], #pre-game-options select, #pre-game-options input[type="text"] { 
+            width: 100%; padding: 8px; margin-bottom: 10px; border: 1px solid #ccc; 
+            border-radius: 4px; box-sizing: border-box; 
+        }
+        #nickname-error { color: red; font-size: 0.9em; margin-top: -5px; margin-bottom: 10px; min-height: 1em;}
         #question-container { margin-bottom: 20px; padding: 15px; border: 1px solid #ccc; border-radius: 5px; background-color: #f9f9f9; }
         #options-container ul { list-style: none; padding: 0; }
         #options-container li { margin-bottom: 10px; }
@@ -23,390 +36,448 @@
         #stats-container { margin-top: 30px; padding: 15px; border: 1px solid #ddd; border-radius: 5px; background-color: #fafafa; }
         #calibration-chart-container { margin-top: 20px; max-width: 600px; }
         #loading { display: none; font-style: italic; color: #555; }
-        #error-message { color: red; margin-top: 10px; font-weight: bold; }
-        .wiki-link { font-size: 0.9em; color: #555; margin-left: 5px; }
+        #error-message { color: red; margin-top: 10px; font-weight: bold; min-height: 1em;}
         .game-over-message { font-weight: bold; margin-top: 10px; }
+        #displayed-category { 
+            font-size: 0.9em; color: #555; margin-bottom: 10px; 
+            font-style: italic; border-bottom: 1px solid #eee; padding-bottom: 5px;
+        } /* Corrected: Removed extra closing brace from here */
     </style>
 </head>
 <body>
-    <h1>Wikipedia Calibration Game</h1>
 
-    <div id="game-area">
-        <button id="new-question-button">Get New Question</button>
-        <div id="loading">Loading question...</div>
+<div id="user-info-display" style="text-align: right; margin-bottom: 10px; font-size: 0.9em;">
+    Playing as: <strong id="user-nickname-text">Guest</strong>
+</div>
 
-        <div id="question-container" style="display: none;">
-            <p id="question-text"></p>
-            <a id="wiki-link" href="#" target="_blank" class="wiki-link" style="display: none;"></a>
-            <div id="options-container"><ul></ul></div>
-            <div id="confidence-section">
-                <label for="confidence">Confidence (0-100%): </label>
-                <input type="range" id="confidence" name="confidence" min="0" max="100" value="25">
-                <span id="confidence-value">25%</span>
-            </div>
-            <button id="submit-answer-button" disabled>Submit Answer</button>
-            <div id="result"></div>
+<div id="nickname-setup-area" class="hidden">
+    <h2>Welcome! Choose Your Nickname</h2>
+    <label for="nickname-input">Enter your desired nickname:</label>
+    <input type="text" id="nickname-input" name="nickname">
+    <div id="nickname-error"></div>
+    <button id="confirm-nickname-button">Confirm Nickname</button>
+    <p style="font-size:0.8em; color: #555;">(Letters, numbers, and underscores only. 3-30 characters.)</p>
+</div>
+
+<div id="pre-game-options" class="hidden">
+    <h2>Game Setup</h2>
+    <div id="category-selection-area">
+        <label for="prefab-category-select">Choose a Category:</label>
+        <select id="prefab-category-select" name="prefab_category">
+            <option value="random" selected>No specific category (default random)</option>
+        </select>
+        <label for="custom-category-input">Or enter your own topic/keywords:</label>
+        <input type="text" id="custom-category-input" name="custom_category" placeholder="e.g., Renaissance Painters, Quantum Physics">
+        <small>If you enter a custom topic, it will be used instead of the dropdown selection.</small>
+    </div>
+</div>
+
+<h1>Wikipedia Calibration Game</h1>
+
+<div id="game-area" class="hidden"> <!-- Initially hidden if nickname setup is needed -->
+    <button id="new-question-button" class="hidden">Begin Game</button>
+    <div id="loading">Loading question...</div>
+    <div id="question-container" style="display: none;">
+        <p id="displayed-category" style="display: none;"></p>
+        <p id="question-text"></p>
+        <a id="wiki-link" href="#" target="_blank" style="display: none;"></a> 
+        <div id="options-container"><ul></ul></div>
+        <div id="confidence-section">
+            <label for="confidence">Confidence (0-100%): </label>
+            <input type="range" id="confidence" name="confidence" min="0" max="100" value="25">
+            <span id="confidence-value">25%</span>
         </div>
-        <div id="error-message"></div>
+        <button id="submit-answer-button" disabled>Submit Answer</button>
+        <div id="result"></div>
     </div>
+    <div id="error-message"></div>
+</div>
 
-    <div id="stats-container">
-        <h2>Session Statistics</h2>
-        <p>Questions Answered (Session): <span id="stat-answered">0</span></p>
-        <p>Correct Answers (Session): <span id="stat-correct">0</span> (<span id="stat-accuracy">N/A</span>%)</p>
-        <p>Average Brier Score (Game): <span id="stat-game-avg-brier">N/A</span></p>
-        <p>Average Brier Score (Session): <span id="stat-session-avg-brier">N/A</span></p>
-        <p>Current Game Score: <span id="stat-total-score">0</span></p>
-        <p>Question: <span id="stat-game-progress">0</span> / <span id="stat-game-length">N/A</span></p>
-        <p>Games Played (Session): <span id="stat-games-played">0</span></p>
-        <p>Average Game Score (Session): <span id="stat-avg-game-score">N/A</span></p>
-        <div id="calibration-chart-container"><canvas id="calibrationChart"></canvas></div>
-    </div>
+<div id="stats-container">
+     <h2>Session Statistics</h2>
+    <p>Questions Answered (Session): <span id="stat-answered">0</span></p>
+    <p>Correct Answers (Session): <span id="stat-correct">0</span> (<span id="stat-accuracy">N/A</span>%)</p>
+    <p>Average Brier Score (Game): <span id="stat-game-avg-brier">N/A</span></p>
+    <p>Average Brier Score (Session): <span id="stat-session-avg-brier">N/A</span></p>
+    <p>Current Game Score: <span id="stat-total-score">0</span></p>
+    <p>Question: <span id="stat-game-progress">0</span> / <span id="stat-game-length">N/A</span></p>
+    <p>Games Played (Session): <span id="stat-games-played">0</span></p>
+    <p>Average Game Score (Session): <span id="stat-avg-game-score">N/A</span></p>
+    <div id="calibration-chart-container"><canvas id="calibrationChart"></canvas></div>
+</div>
 
-    <script>
-        // DOM Elements
-        const newQuestionButton = document.getElementById('new-question-button');
-        const loadingElement = document.getElementById('loading');
-        const questionContainer = document.getElementById('question-container');
-        const questionTextElement = document.getElementById('question-text');
-        const wikiLinkElement = document.getElementById('wiki-link');
-        const optionsElement = document.getElementById('options-container').querySelector('ul');
-        const confidenceSlider = document.getElementById('confidence');
-        const confidenceValueElement = document.getElementById('confidence-value');
-        const submitButton = document.getElementById('submit-answer-button');
-        const resultElement = document.getElementById('result');
-        const errorMessageElement = document.getElementById('error-message');
+<script>
+    // DOM Elements
+    const gameArea = document.getElementById('game-area'); 
+    const displayedCategoryElement = document.getElementById('displayed-category');
+    const newQuestionButton = document.getElementById('new-question-button');
+    const loadingElement = document.getElementById('loading');
+    const questionContainer = document.getElementById('question-container');
+    const questionTextElement = document.getElementById('question-text');
+    const optionsElement = document.getElementById('options-container').querySelector('ul');
+    const confidenceSlider = document.getElementById('confidence');
+    const confidenceValueElement = document.getElementById('confidence-value');
+    const submitButton = document.getElementById('submit-answer-button');
+    const resultElement = document.getElementById('result');
+    const errorMessageElement = document.getElementById('error-message');
+    const userNicknameTextElement = document.getElementById('user-nickname-text');
 
-        // Stats Elements
-        const statAnswered = document.getElementById('stat-answered');
-        const statCorrect = document.getElementById('stat-correct');
-        const statAccuracy = document.getElementById('stat-accuracy');
-        const statGameAvgBrier = document.getElementById('stat-game-avg-brier');
-        const statSessionAvgBrier = document.getElementById('stat-session-avg-brier');
-        const statTotalScore = document.getElementById('stat-total-score');
-        const statGameProgress = document.getElementById('stat-game-progress');
-        const statGameLength = document.getElementById('stat-game-length');
-        const statGamesPlayed = document.getElementById('stat-games-played');
-        const statAvgGameScore = document.getElementById('stat-avg-game-score');
-        const calibrationChartCtx = document.getElementById('calibrationChart').getContext('2d');
+    const nicknameSetupArea = document.getElementById('nickname-setup-area');
+    const nicknameInputElement = document.getElementById('nickname-input');
+    const confirmNicknameButton = document.getElementById('confirm-nickname-button');
+    const nicknameErrorElement = document.getElementById('nickname-error');
 
-        // Game State
-        let currentQuestionData = null; // This will be the data from /get_trivia_question
-        let activeQuestionFromServer = null; // Stores question passed from server on page load
-        let selectedAnswer = null;
-        let calibrationChart = null;
-        const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const preGameOptionsDiv = document.getElementById('pre-game-options');
+    const prefabCategorySelect = document.getElementById('prefab-category-select');
+    const customCategoryInput = document.getElementById('custom-category-input');
 
-        // --- Utility Functions ---
-        function showLoading() { loadingElement.style.display = 'block'; errorMessageElement.textContent = ''; }
-        function hideLoading() { loadingElement.style.display = 'none'; }
-        function showQuestionUi() { questionContainer.style.display = 'block'; }
-        function hideQuestionUi() { questionContainer.style.display = 'none'; } // Renamed for clarity
-        function displayError(message) { errorMessageElement.textContent = message; console.error("Displaying Error:", message); }
-        function clearError() { errorMessageElement.textContent = ''; }
+    const statAnswered = document.getElementById('stat-answered'); const statCorrect = document.getElementById('stat-correct'); const statAccuracy = document.getElementById('stat-accuracy'); const statGameAvgBrier = document.getElementById('stat-game-avg-brier'); const statSessionAvgBrier = document.getElementById('stat-session-avg-brier'); const statTotalScore = document.getElementById('stat-total-score'); const statGameProgress = document.getElementById('stat-game-progress'); const statGameLength = document.getElementById('stat-game-length'); const statGamesPlayed = document.getElementById('stat-games-played'); const statAvgGameScore = document.getElementById('stat-avg-game-score'); const calibrationChartCtx = document.getElementById('calibrationChart').getContext('2d');
+    
+    let currentQuestionData = null; 
+    let selectedAnswer = null;
+    let calibrationChart = null;
 
-        // --- Core Game Logic ---
-        function renderQuestion(questionData) {
-            currentQuestionData = questionData; // Set global currentQuestionData
-            console.log("Rendering question:", currentQuestionData);
-
-            questionTextElement.textContent = currentQuestionData.question;
-            wikiLinkElement.href = currentQuestionData.wiki_page_url;
-            wikiLinkElement.textContent = `(Source: ${currentQuestionData.wiki_page_title})`;
-            wikiLinkElement.style.display = 'inline';
-            optionsElement.innerHTML = '';
-
-            if (typeof currentQuestionData.options !== 'object' || currentQuestionData.options === null) {
-                 console.error('ERROR: currentQuestionData.options is not an object!', currentQuestionData.options);
-                 displayError('Received invalid question options format.'); return;
-            }
-            try {
-                const optionLetters = Object.keys(currentQuestionData.options);
-                optionLetters.sort(() => Math.random() - 0.5); // Shuffle for display
-                optionLetters.forEach(letter => {
-                    if (currentQuestionData.options.hasOwnProperty(letter)) {
-                        const text = currentQuestionData.options[letter];
-                        const li = document.createElement('li');
-                        const button = document.createElement('button');
-                        button.textContent = `${letter}) ${text}`;
-                        button.classList.add('option-button');
-                        button.dataset.answerLetter = letter;
-                        button.onclick = () => {
-                            const currentlySelected = optionsElement.querySelector('.selected');
-                            if (currentlySelected) currentlySelected.classList.remove('selected');
-                            button.classList.add('selected');
-                            selectedAnswer = letter;
-                            submitButton.disabled = false;
-                        };
-                        li.appendChild(button); optionsElement.appendChild(li);
-                    }
-                });
-            } catch (loopError) { console.error("Error creating option buttons:", loopError); displayError("Error displaying options."); return; }
-
-            resultElement.textContent = ''; resultElement.className = '';
-            submitButton.disabled = true;
-            confidenceSlider.value = 25; confidenceValueElement.textContent = '25%';
-            selectedAnswer = null;
-            document.getElementById('confidence-section').style.display = 'block';
-            submitButton.style.display = 'inline-block';
-            newQuestionButton.disabled = true; // Disable "Get New Question" when a question is active (Point c)
-            showQuestionUi();
+    function showLoading() { loadingElement.style.display = 'block'; clearError(); clearError(false); }
+    function hideLoading() { loadingElement.style.display = 'none'; }
+    function showQuestionUi() { questionContainer.style.display = 'block'; }
+    function hideQuestionUi() { 
+        questionContainer.style.display = 'none';
+        if (displayedCategoryElement) {
+             displayedCategoryElement.textContent = '';
+             displayedCategoryElement.style.display = 'none';
         }
+    }
+    function displayError(message, isGlobal = true) { 
+        if (isGlobal) errorMessageElement.textContent = message;
+        else nicknameErrorElement.textContent = message;
+        console.error("Displaying Error:", message); 
+    }
+    function clearError(isGlobal = true) { 
+        if (isGlobal) errorMessageElement.textContent = ''; 
+        else nicknameErrorElement.textContent = '';
+    }
 
-        function fetchNewQuestion() {
-            if (newQuestionButton.textContent === 'Play Again?') { startNewGame(); return; }
-
-            showLoading(); hideQuestionUi(); clearError();
-            newQuestionButton.disabled = true; // Disable while fetching
-
-            fetch('/get_trivia_question')
-                .then(response => { if (!response.ok) { return response.json().then(errData => { throw new Error(errData.error || `HTTP error ${response.status}`); }); } return response.json(); })
-                .then(data => {
-                    hideLoading();
-                    if (data.error) { displayError(data.error); newQuestionButton.disabled = false; return; } // Re-enable button on error
-                    renderQuestion(data); // Use the new renderQuestion function
-                })
-                .catch(error => {
-                    console.error('Error fetching question:', error); displayError(error.message || 'Failed to fetch Q.');
-                    hideLoading(); newQuestionButton.disabled = false; // Re-enable button on error
-                });
-        }
-
-        function submitAnswer() {
-            if (!selectedAnswer) return;
-            const confidence = parseInt(confidenceSlider.value, 10);
-            showLoading(); clearError();
-
-            fetch('/submit_answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer: selectedAnswer, confidence: confidence }) })
-                .then(response => { if (!response.ok) { return response.json().then(errData => { throw new Error(errData.error || `HTTP error ${response.status}`); }); } return response.json(); })
-                .then(resultData => {
-                    hideLoading();
-                    if (resultData.error){ displayError(resultData.error); return; }
-
-                    let feedbackText = `Result: ${resultData.result}. Correct Answer: ${resultData.correct_answer}) ${resultData.correct_answer_text}.`;
-                    feedbackText += ` Brier Score: ${resultData.brier_score.toFixed(3)}.`; // Format Brier
-                    if (resultData.points_awarded !== undefined && resultData.points_awarded !== null) {
-                         feedbackText += ` Points: ${resultData.points_awarded.toFixed(1)}`;
-                    }
-                    console.log("Final feedbackText:", feedbackText); console.log("resultData object:", JSON.stringify(resultData, null, 2));
-                    resultElement.textContent = feedbackText; resultElement.className = resultData.result;
-                    // showQuestionUi(); // Already visible, result is inside question container
-
-                    const buttons = optionsElement.querySelectorAll('.option-button');
-                    buttons.forEach(button => {
-                        button.disabled = true; const btnLetter = button.dataset.answerLetter;
-                        if (btnLetter === resultData.correct_answer) button.classList.add('correct');
-                        else if (btnLetter === selectedAnswer) button.classList.add('incorrect');
-                        button.classList.remove('selected');
-                    });
-
-                    updateStats(resultData.new_stats, "submitAnswer");
-                    fetchCalibrationData(); // This also calls updateStats, ensure no race conditions
-                    submitButton.disabled = true;
-
-                    if (resultData.end_of_game) {
-                        let gameBrierForDisplay = "N/A";
-                        if (resultData.new_stats.game_brier_scores && resultData.new_stats.game_brier_scores.length > 0) {
-                             gameBrierForDisplay = (resultData.new_stats.game_brier_scores.reduce((a,b)=>a+b,0) / resultData.new_stats.game_brier_scores.length).toFixed(3);
-                        }
-                        resultElement.innerHTML += `<br><div class="game-over-message">Game Over! Final Score: ${resultData.new_stats.cumulative_score.toFixed(1)}. Avg Brier (This Game): ${gameBrierForDisplay}</div>`;
-                        newQuestionButton.textContent = 'Play Again?';
-                        newQuestionButton.disabled = false; // Enable "Play Again?"
-                        document.getElementById('confidence-section').style.display = 'none';
-                        submitButton.style.display = 'none';
-                    } else {
-                        newQuestionButton.disabled = false; // Re-enable "Get New Question" for next round (Point c)
-                    }
-                })
-                .catch(error => { console.error('Error submitting answer:', error); displayError(error.message || 'Failed to submit.'); hideLoading(); newQuestionButton.disabled = false; });
-        }
-
-        function startNewGame() {
-            console.log("Starting new game..."); showLoading();
-            fetch('/start_new_game', { method: 'POST' })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        console.log("New game session from backend:", data.new_stats);
-                        updateStats(data.new_stats, "startNewGame_backend");
-                        fetchCalibrationData(); // Update chart with cleared game data
-                        newQuestionButton.textContent = 'Get New Question';
-                        // fetchNewQuestion will be called after this by user click or auto-logic if added
-                        // For now, let's fetch the first question of the new game
-                        fetchNewQuestion();
-                    } else { displayError("Could not start new game."); hideLoading(); }
-                })
-                .catch(error => { console.error('Error starting new game:', error); displayError("Error starting new game."); hideLoading(); });
-        }
-
-
-        function updateStats(stats, source = "unknown") { // Added source for easier debugging
-            console.log(`updateStats called FROM ${source} with stats:`, JSON.stringify(stats, null, 2));
-            if (!stats) { console.error(`updateStats (from ${source}) called with null/undefined stats.`); return; }
-
-            statAnswered.textContent = stats.total_answered !== undefined ? stats.total_answered : '0';
-            statCorrect.textContent = stats.total_correct !== undefined ? stats.total_correct : '0';
-            const accuracy = (stats.total_answered && stats.total_answered > 0 && stats.total_correct !== undefined)
-                ? ((stats.total_correct / stats.total_answered) * 100).toFixed(1) : 'N/A';
-            statAccuracy.textContent = accuracy;
-
-            const gameAvgBrier = (stats.game_brier_scores && stats.game_brier_scores.length > 0)
-                ? (stats.game_brier_scores.reduce((a, b) => a + b, 0) / stats.game_brier_scores.length).toFixed(3) : 'N/A';
-            statGameAvgBrier.textContent = gameAvgBrier;
-
-            const sessionAvgBrier = (stats.brier_scores && stats.brier_scores.length > 0)
-                ? (stats.brier_scores.reduce((a, b) => a + b, 0) / stats.brier_scores.length).toFixed(3) : 'N/A';
-            statSessionAvgBrier.textContent = sessionAvgBrier;
-
-            if (stats.hasOwnProperty('cumulative_score') && stats.cumulative_score !== null) {
-                let score = parseFloat(stats.cumulative_score);
-                if (!isNaN(score)) { statTotalScore.textContent = score.toFixed(1); console.log(`Cumulative score updated to: ${score.toFixed(1)} (Source: ${source})`);}
-                else { console.error(`Cumulative score NaN: ${stats.cumulative_score} (Source: ${source})`); statTotalScore.textContent = 'Error'; }
-            } else { console.log(`Cumulative score not found/null. Defaulting to 0. (Source: ${source})`); statTotalScore.textContent = '0'; }
-
-            statGameProgress.textContent = stats.questions_this_game !== undefined ? stats.questions_this_game : '0';
-            statGameLength.textContent = stats.game_length_setting !== undefined ? stats.game_length_setting : 'N/A';
-            statGamesPlayed.textContent = stats.games_played_session !== undefined ? stats.games_played_session : '0';
-
-            const avgGameScore = (stats.completed_game_scores_session && stats.completed_game_scores_session.length > 0)
-                ? (stats.completed_game_scores_session.reduce((a,b) => a + b, 0) / stats.completed_game_scores_session.length).toFixed(1) : 'N/A';
-            statAvgGameScore.textContent = avgGameScore;
-        }
-
-        function fetchStats() { fetch(`/get_stats?session_id=${sessionId}`).then(r => r.json()).then(s => updateStats(s, "fetchStats_initial")).catch(e => console.error('Error fetching stats:', e)); }
-        function fetchCalibrationData() { fetch(`/get_calibration_data?session_id=${sessionId}`).then(r => r.json()).then(d => renderCalibrationChart(d)).catch(e => console.error('Error fetching calibration data:', e)); }
-        // In index.html
-
-        function renderCalibrationChart(data) {
-            const points = data.points || [];
-            console.log("Rendering calibration chart with points:", points);
-            const chartData = points.map(p => ({ x: p.x, y: p.y }));
-            const counts = points.map(p => p.count);
-            const maxCount = Math.max(1, ...counts); // Avoid division by 0 if counts is empty
-            const minRadius = 3;
-            const maxRadius = 15;
-            const pointRadii = points.map(p => {
-                if (p.count <= 0) return minRadius;
-                let radius = minRadius + (maxRadius - minRadius) * Math.sqrt(p.count / maxCount);
-                return Math.min(radius, maxRadius);
-            });
-            const perfectLine = [{x: 0, y: 0}, {x: 100, y: 1.0}];
-
-            if (calibrationChart) {
-                calibrationChart.data.datasets[0].data = chartData;
-                calibrationChart.data.datasets[0].pointRadius = pointRadii;
-                calibrationChart.update();
-                console.log("Calibration chart updated.");
+    function handleNicknameSetup(needsSetup, suggestedNickname, currentConfirmedNickname) {
+        clearError(); clearError(false); 
+        if (needsSetup) {
+            nicknameSetupArea.classList.remove('hidden');
+            preGameOptionsDiv.classList.add('hidden');
+            newQuestionButton.classList.add('hidden');
+            gameArea.classList.add('hidden'); 
+            nicknameInputElement.value = suggestedNickname || '';
+            userNicknameTextElement.textContent = "Choosing nickname...";
+        } else {
+            nicknameSetupArea.classList.add('hidden');
+            gameArea.classList.remove('hidden'); 
+            userNicknameTextElement.textContent = currentConfirmedNickname || "Guest";
+            if (!currentQuestionData) { 
+                 preGameOptionsDiv.classList.remove('hidden');
+                 newQuestionButton.classList.remove('hidden');
+                 newQuestionButton.textContent = 'Begin Game';
+                 newQuestionButton.disabled = false;
             } else {
-                console.log("Creating new calibration chart.");
-                calibrationChart = new Chart(calibrationChartCtx, {
-                    type: 'scatter',
-                    data: {
-                        datasets: [
-                            {
-                                label: 'Calibration Bins',
-                                data: chartData,
-                                backgroundColor: 'rgba(0, 0, 255, 0.7)',
-                                borderColor: 'rgba(0, 0, 255, 1)',
-                                pointRadius: pointRadii,
-                                pointHoverRadius: pointRadii.map(r => r + 2),
-                                order: 2
-                            },
-                            {
-                                label: 'Perfect Calibration',
-                                data: perfectLine,
-                                type: 'line',
-                                borderColor: 'rgba(200, 200, 200, 0.8)',
-                                borderWidth: 2,
-                                pointRadius: 0,
-                                fill: false,
-                                tension: 0,
-                                order: 1
-                            }
-                        ]
-                    },
-                    options: { // This is the options object literal
-                        scales: {
-                            x: {
-                                type: 'linear',
-                                position: 'bottom',
-                                title: { display: true, text: 'Average Confidence in Bin (%)' },
-                                min: 0,
-                                max: 100
-                            },
-                            y: {
-                                title: { display: true, text: 'Accuracy (Proportion Correct)' },
-                                min: 0,
-                                max: 1.0
-                            }
-                        },
-                        plugins: {
-                            tooltip: {
-                                callbacks: {
-                                    label: function(context) {
-                                        if (context.datasetIndex === 0) {
-                                            const pointIndex = context.dataIndex;
-                                            const originalPoint = points[pointIndex];
-                                            if (!originalPoint) return "Data point error";
-                                            let label = ` Bin ${pointIndex + 1}:`;
-                                            label += ` Avg Confidence: ${originalPoint.x.toFixed(1)}%`;
-                                            label += `, Accuracy: ${(originalPoint.y * 100).toFixed(1)}%`;
-                                            label += ` (Count: ${originalPoint.count})`;
-                                            return label;
-                                        } else {
-                                            return null; // No tooltip for the perfect line
-                                        }
-                                    }
-                                }
-                            },
-                            legend: {
-                                display: true
-                            }
-                        },
-                        responsive: true,
-                        maintainAspectRatio: true
-                    } // End of options object
-                }); // End of new Chart call
+                preGameOptionsDiv.classList.add('hidden'); // Hide if question is active
+                newQuestionButton.classList.remove('hidden'); // But game button may be visible (renderQuestion will disable)
             }
         }
+    }
 
-        // --- Event Listeners ---
-        newQuestionButton.addEventListener('click', fetchNewQuestion);
-        submitButton.addEventListener('click', submitAnswer);
-        confidenceSlider.addEventListener('input', (e) => { confidenceValueElement.textContent = `${e.target.value}%`; });
+    confirmNicknameButton.addEventListener('click', () => {
+        const chosenNickname = nicknameInputElement.value.trim();
+        nicknameErrorElement.textContent = ''; 
+        showLoading();
 
-            // Initial load
-        document.addEventListener('DOMContentLoaded', () => {
-            // Get the raw string output from Jinja, hopefully as a valid JSON string or the string 'null'
-            const activeQuestionJsonString = '{{ active_question_data | tojson | safe if active_question_data else "null" }}';
-            let serverPassedQuestionData = null;
-
-            // console.log("Raw activeQuestionJsonString from server:", activeQuestionJsonString); // Debug the raw string
-
-            if (activeQuestionJsonString && activeQuestionJsonString !== 'null') {
-                try {
-                    serverPassedQuestionData = JSON.parse(activeQuestionJsonString);
-                } catch (e) {
-                    console.error("Error parsing activeQuestionJsonString:", e);
-                    console.error("Raw string was:", activeQuestionJsonString); // Log the problematic string
-                    // It's possible that 'tojson | safe' already produced a JS object, not a string.
-                    // This can happen if the template isn't wrapped in JS quotes correctly at the point of injection.
-                    // However, our current setup passes it into a JS string ('...')
-                }
+        fetch('/set_nickname', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nickname: chosenNickname })
+        })
+        .then(response => response.json())
+        .then(data => {
+            hideLoading();
+            if (data.status === 'success') {
+                userNicknameTextElement.textContent = data.nickname;
+                sessionStorage.removeItem('force_nickname_setup'); 
+                sessionStorage.removeItem('suggested_nickname_temp');
+                handleNicknameSetup(false, null, data.nickname); 
+                fetchStats(); 
+            } else {
+                displayError(data.message || "Error setting nickname.", false);
             }
-
-            if (serverPassedQuestionData) {
-                console.log("Active question data found from server on page load:", serverPassedQuestionData);
-                // As discussed, we are not auto-rendering the question on refresh to simplify state.
-                // User will click "Get New Question".
-                // If you wanted to render it:
-                // renderQuestion(serverPassedQuestionData);
-                // newQuestionButton.disabled = true;
-            }
-
-            fetchStats();
-            fetchCalibrationData();
+        })
+        .catch(error => {
+            hideLoading();
+            console.error('Error setting nickname:', error);
+            displayError("Could not save nickname. Please try again.", false);
         });
-    </script>
+    });
+    
+    function fetchUserCategories() {
+        fetch('/get_user_selectable_categories')
+            .then(response => { if (!response.ok) throw new Error(`HTTP error ${response.status}`); return response.json();})
+            .then(data => {
+                if (data.categories && Array.isArray(data.categories)) {
+                    while (prefabCategorySelect.options.length > 1) { prefabCategorySelect.remove(1); }
+                    data.categories.forEach(category => {
+                        const option = document.createElement('option');
+                        option.value = category; option.textContent = category;
+                        prefabCategorySelect.appendChild(option);
+                    });
+                } else { console.warn("No categories data received:", data); }
+            })
+            .catch(error => console.error('Error fetching user categories:', error));
+    }
+
+    function renderQuestion(questionDataFromServer) { 
+        currentQuestionData = questionDataFromServer; 
+        console.log("Rendering question:", currentQuestionData);
+        clearError(); 
+
+        if (currentQuestionData.display_category_name) {
+            displayedCategoryElement.textContent = `Category: ${currentQuestionData.display_category_name}`;
+            displayedCategoryElement.style.display = 'block';
+        } else {
+            displayedCategoryElement.textContent = '';
+            displayedCategoryElement.style.display = 'none';
+        }
+        questionTextElement.textContent = currentQuestionData.question;
+        optionsElement.innerHTML = '';
+        const optionLetters = ['A', 'B', 'C', 'D'];
+        optionLetters.forEach(letter => {
+            if (currentQuestionData.options && currentQuestionData.options.hasOwnProperty(letter)) {
+                const text = currentQuestionData.options[letter];
+                const li = document.createElement('li');
+                const button = document.createElement('button');
+                button.textContent = `${letter}) ${text}`;
+                button.classList.add('option-button');
+                button.dataset.answerLetter = letter;
+                button.onclick = () => { 
+                    const currentlySelected = optionsElement.querySelector('.selected');
+                    if (currentlySelected) currentlySelected.classList.remove('selected');
+                    button.classList.add('selected');
+                    selectedAnswer = letter;
+                    submitButton.disabled = false;
+                };
+                li.appendChild(button); optionsElement.appendChild(li);
+            }
+        });
+        resultElement.textContent = ''; resultElement.className = '';
+        submitButton.disabled = true;
+        confidenceSlider.value = 25; confidenceValueElement.textContent = '25%';
+        selectedAnswer = null;
+        document.getElementById('confidence-section').style.display = 'block';
+        submitButton.style.display = 'inline-block';
+        
+        newQuestionButton.classList.remove('hidden'); 
+        newQuestionButton.disabled = true; 
+
+        preGameOptionsDiv.classList.add('hidden'); 
+        nicknameSetupArea.classList.add('hidden'); 
+        showQuestionUi();
+    }
+    
+    function handleBackendActionError(error, actionType = "operation") {
+        console.error(`Error during ${actionType}:`, error);
+        let message = error.message || `Failed to complete ${actionType}.`;
+        
+        if (error.action_needed === "complete_nickname_setup") {
+            message = error.message || "Please set your nickname before continuing.";
+            displayError(message); 
+            
+            sessionStorage.setItem('force_nickname_setup', 'true');
+            const currentNickInput = nicknameInputElement.value;
+            const currentTopDisplayNick = userNicknameTextElement.textContent;
+            if (currentNickInput) {
+                sessionStorage.setItem('suggested_nickname_temp', currentNickInput);
+            } else if (currentTopDisplayNick && currentTopDisplayNick !== "Guest" && currentTopDisplayNick !== "Choosing nickname...") {
+                 sessionStorage.setItem('suggested_nickname_temp', currentTopDisplayNick);
+            }
+            window.location.reload(); 
+            return; 
+        } else {
+            displayError(message); 
+        }
+        hideLoading();
+        if (nicknameSetupArea.classList.contains('hidden')) { 
+            if (!currentQuestionData || newQuestionButton.textContent === "Play Again?") {
+                 newQuestionButton.disabled = false;
+            }
+        }
+    }
+
+    function fetchNewQuestion() {
+        showLoading(); 
+        hideQuestionUi(); 
+        newQuestionButton.disabled = true; 
+        preGameOptionsDiv.classList.add('hidden');
+        const customCategory = customCategoryInput.value.trim();
+        const selectedPrefabCategory = prefabCategorySelect.value;
+        let categoryParams = '';
+        if (customCategory) categoryParams = `user_category_custom=${encodeURIComponent(customCategory)}`;
+        else if (selectedPrefabCategory && selectedPrefabCategory !== 'random') categoryParams = `user_category_prefab=${encodeURIComponent(selectedPrefabCategory)}`;
+        const fetchUrl = `/get_trivia_question${categoryParams ? '?' + categoryParams : ''}`;
+        
+        fetch(fetchUrl)
+            .then(response => {
+                if (!response.ok) { return response.json().then(errData => { errData.status = response.status; throw errData; }).catch(() => { throw { message: `HTTP error ${response.status}`, status: response.status };});}
+                return response.json();
+            })
+            .then(data => {
+                hideLoading();
+                if (data.error && data.action_needed === "complete_nickname_setup") { handleBackendActionError(data, "fetching question");
+                } else if (data.error) { 
+                    displayError(data.error); newQuestionButton.disabled = false; 
+                    if (newQuestionButton.textContent !== 'Play Again?' && nicknameSetupArea.classList.contains('hidden')) preGameOptionsDiv.classList.remove('hidden');
+                } else { renderQuestion(data); }
+            })
+            .catch(error => {
+                handleBackendActionError(error, "fetching question");
+                 if (error.action_needed !== "complete_nickname_setup" && !currentQuestionData) {
+                     newQuestionButton.disabled = false;
+                     if (nicknameSetupArea.classList.contains('hidden')) preGameOptionsDiv.classList.remove('hidden'); 
+                }
+            });
+    }
+
+    function submitAnswer() {
+        if (!selectedAnswer) return;
+        const confidence = parseInt(confidenceSlider.value, 10);
+        showLoading(); 
+        fetch('/submit_answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer: selectedAnswer, confidence: confidence }) })
+            .then(response => {
+                if (!response.ok) { return response.json().then(errData => { errData.status = response.status; throw errData; }).catch(() => { throw { message: `HTTP error ${response.status}`, status: response.status };});}
+                return response.json();
+            })
+            .then(resultData => {
+                hideLoading();
+                if (resultData.error && resultData.action_needed === "complete_nickname_setup") { handleBackendActionError(resultData, "submitting answer"); return;
+                } else if (resultData.error){ displayError(resultData.error); newQuestionButton.disabled = false; return; } 
+                
+                let feedbackText = `Result: ${resultData.result}. Correct Answer: ${resultData.correct_answer}) ${resultData.correct_answer_text}. Brier Score: ${resultData.brier_score.toFixed(3)}.`;
+                if (resultData.points_awarded !== undefined && resultData.points_awarded !== null) feedbackText += ` Points: ${resultData.points_awarded.toFixed(1)}`;
+                resultElement.textContent = feedbackText; resultElement.className = resultData.result;
+                const buttons = optionsElement.querySelectorAll('.option-button');
+                buttons.forEach(button => { 
+                    button.disabled = true; const btnLetter = button.dataset.answerLetter;
+                    if (btnLetter === resultData.correct_answer) button.classList.add('correct');
+                    else if (btnLetter === selectedAnswer) button.classList.add('incorrect');
+                    button.classList.remove('selected');
+                });
+                updateStats(resultData.new_stats, "submitAnswer"); fetchCalibrationData(); submitButton.disabled = true;
+                
+                if (resultData.end_of_game) {
+                    let gameBrierForDisplay = "N/A"; if (resultData.new_stats.game_brier_scores && resultData.new_stats.game_brier_scores.length > 0) gameBrierForDisplay = (resultData.new_stats.game_brier_scores.reduce((a,b)=>a+b,0) / resultData.new_stats.game_brier_scores.length).toFixed(3);
+                    resultElement.innerHTML += `<br><div class="game-over-message">Game Over! Final Score: ${resultData.new_stats.cumulative_score.toFixed(1)}. Avg Brier (This Game): ${gameBrierForDisplay}</div>`;
+                    newQuestionButton.textContent = 'Play Again?'; newQuestionButton.disabled = false; 
+                    document.getElementById('confidence-section').style.display = 'none'; submitButton.style.display = 'none';
+                    currentQuestionData = null; 
+                } else {
+                    newQuestionButton.textContent = 'Get Next Question'; newQuestionButton.disabled = false; 
+                }
+            })
+            .catch(error => { 
+                handleBackendActionError(error, "submitting answer");
+                if (error.action_needed !== "complete_nickname_setup") newQuestionButton.disabled = false;
+            });
+    }
+
+    function startNewGame() { 
+        showLoading();
+        fetch('/start_new_game', { method: 'POST' })
+            .then(response => {
+                if (!response.ok) { return response.json().then(errData => { errData.status = response.status; throw errData; }).catch(() => { throw { message: `HTTP error ${response.status}`, status: response.status };});}
+                return response.json();
+            })
+            .then(data => {
+                hideLoading();
+                 if (data.error && data.action_needed === "complete_nickname_setup") { handleBackendActionError(data, "starting new game"); return;
+                } else if (data.status !== 'success') { 
+                    displayError(data.message || "Could not start new game."); newQuestionButton.disabled = false; return;
+                }
+                updateStats(data.new_stats, "startNewGame_backend"); fetchCalibrationData(); currentQuestionData = null; 
+                handleNicknameSetup(false, null, userNicknameTextElement.textContent); 
+                prefabCategorySelect.value = 'random'; customCategoryInput.value = ''; hideQuestionUi(); resultElement.innerHTML = '';          
+            })
+            .catch(error => { 
+                handleBackendActionError(error, "starting new game");
+                if (error.action_needed !== "complete_nickname_setup") newQuestionButton.disabled = false;
+            });
+    }
+
+    function updateStats(stats, source = "unknown") { 
+        console.log(`updateStats called FROM ${source} with stats:`, JSON.stringify(stats, null, 2));
+        if (!stats) { console.error(`updateStats (from ${source}) called with null/undefined stats.`); return; }
+        statAnswered.textContent = stats.total_answered !== undefined ? stats.total_answered : '0';
+        statCorrect.textContent = stats.total_correct !== undefined ? stats.total_correct : '0';
+        const accuracy = (stats.total_answered && stats.total_answered > 0 && stats.total_correct !== undefined) ? ((stats.total_correct / stats.total_answered) * 100).toFixed(1) : 'N/A';
+        statAccuracy.textContent = accuracy;
+        const gameAvgBrier = (stats.game_brier_scores && stats.game_brier_scores.length > 0) ? (stats.game_brier_scores.reduce((a, b) => a + b, 0) / stats.game_brier_scores.length).toFixed(3) : 'N/A';
+        statGameAvgBrier.textContent = gameAvgBrier;
+        const sessionAvgBrier = (stats.brier_scores && stats.brier_scores.length > 0) ? (stats.brier_scores.reduce((a, b) => a + b, 0) / stats.brier_scores.length).toFixed(3) : 'N/A';
+        statSessionAvgBrier.textContent = sessionAvgBrier;
+        if (stats.hasOwnProperty('cumulative_score') && stats.cumulative_score !== null) { let score = parseFloat(stats.cumulative_score); if (!isNaN(score)) { statTotalScore.textContent = score.toFixed(1); } else { statTotalScore.textContent = 'Error'; }} else { statTotalScore.textContent = '0'; }
+        statGameProgress.textContent = stats.questions_this_game !== undefined ? stats.questions_this_game : '0';
+        statGameLength.textContent = stats.game_length_setting !== undefined ? stats.game_length_setting : 'N/A';
+        statGamesPlayed.textContent = stats.games_played_session !== undefined ? stats.games_played_session : '0';
+        const avgGameScore = (stats.completed_game_scores_session && stats.completed_game_scores_session.length > 0) ? (stats.completed_game_scores_session.reduce((a,b) => a + b, 0) / stats.completed_game_scores_session.length).toFixed(1) : 'N/A';
+        statAvgGameScore.textContent = avgGameScore;
+    }
+    function fetchStats() { fetch('/get_stats').then(r => r.json()).then(s => updateStats(s, "fetchStats_initial")).catch(e => console.error('Error fetching stats:', e)); }
+    function fetchCalibrationData() { fetch('/get_calibration_data').then(r => r.json()).then(d => renderCalibrationChart(d)).catch(e => console.error('Error fetching calibration data:', e)); }
+    function renderCalibrationChart(data) { 
+        const points = data.points || []; const chartData = points.map(p => ({ x: p.x, y: p.y })); const counts = points.map(p => p.count); const maxCount = Math.max(1, ...counts); const minRadius = 3; const maxRadius = 15; const pointRadii = points.map(p => { if (p.count <= 0) return minRadius; let radius = minRadius + (maxRadius - minRadius) * Math.sqrt(p.count / maxCount); return Math.min(radius, maxRadius); }); const perfectLine = [{x: 0, y: 0}, {x: 100, y: 1.0}];
+        if (calibrationChart) { calibrationChart.data.datasets[0].data = chartData; calibrationChart.data.datasets[0].pointRadius = pointRadii; calibrationChart.update();
+        } else { calibrationChart = new Chart(calibrationChartCtx, { type: 'scatter', data: { datasets: [ { label: 'Calibration Bins', data: chartData, backgroundColor: 'rgba(0, 0, 255, 0.7)', borderColor: 'rgba(0, 0, 255, 1)', pointRadius: pointRadii, pointHoverRadius: pointRadii.map(r => r + 2), order: 2 }, { label: 'Perfect Calibration', data: perfectLine, type: 'line', borderColor: 'rgba(200, 200, 200, 0.8)', borderWidth: 2, pointRadius: 0, fill: false, tension: 0, order: 1 } ] }, options: { scales: { x: { type: 'linear', position: 'bottom', title: { display: true, text: 'Average Confidence in Bin (%)' }, min: 0, max: 100 }, y: { title: { display: true, text: 'Accuracy (Proportion Correct)' }, min: 0, max: 1.0 } }, plugins: { tooltip: { callbacks: { label: function(context) { if (context.datasetIndex === 0) { const pointIndex = context.dataIndex; const originalPoint = points[pointIndex]; if (!originalPoint) return "Data point error"; let label = ` Bin ${pointIndex + 1}: Avg Confidence: ${originalPoint.x.toFixed(1)}%, Accuracy: ${(originalPoint.y * 100).toFixed(1)}% (Count: ${originalPoint.count})`; return label; } else { return null; } } } }, legend: { display: true } }, responsive: true, maintainAspectRatio: true } }); }
+    }
+
+    newQuestionButton.addEventListener('click', () => {
+        if (newQuestionButton.textContent === 'Play Again?') startNewGame(); 
+        else fetchNewQuestion(); 
+    });
+    submitButton.addEventListener('click', submitAnswer);
+    confidenceSlider.addEventListener('input', (e) => { confidenceValueElement.textContent = `${e.target.value}%`; });
+    
+    document.addEventListener('DOMContentLoaded', () => {
+        let userInfoOnLoad = null;
+        try { userInfoOnLoad = JSON.parse('{{ user_info | tojson | safe if user_info is not none else "null" }}'); } 
+        catch (e) { console.error("Error parsing user_info:", e, '{{ user_info | tojson | safe if user_info is not none else "null" }}');}
+
+        let activeQuestionDataFromServer = null;
+        try { activeQuestionDataFromServer = JSON.parse('{{ active_question_data | tojson | safe if active_question_data is not none else "null" }}'); } 
+        catch (e) { console.error("Error parsing active_question_data:", e, '{{ active_question_data | tojson | safe if active_question_data is not none else "null" }}');}
+        
+        let needsNicknameSetupOnLoad = ('{{ needs_nickname_setup | default(false) | tojson }}' === 'true');
+        
+        let suggestedNicknameOnLoad = null;
+        try { suggestedNicknameOnLoad = JSON.parse('{{ suggested_nickname | tojson | safe if suggested_nickname is not none else "null" }}'); } 
+        catch (e) { console.error("Error parsing suggested_nickname:", e, '{{ suggested_nickname | tojson | safe if suggested_nickname is not none else "null" }}');}
+
+        if (sessionStorage.getItem('force_nickname_setup') === 'true') {
+            needsNicknameSetupOnLoad = true;
+            const storedSuggestion = sessionStorage.getItem('suggested_nickname_temp');
+            if (storedSuggestion) suggestedNicknameOnLoad = storedSuggestion; 
+            sessionStorage.removeItem('force_nickname_setup');
+            sessionStorage.removeItem('suggested_nickname_temp');
+        }
+
+        let currentConfirmedNickname = "Guest"; 
+        if (userInfoOnLoad && userInfoOnLoad.nickname) currentConfirmedNickname = userInfoOnLoad.nickname;
+        
+        handleNicknameSetup(needsNicknameSetupOnLoad, suggestedNicknameOnLoad, currentConfirmedNickname);
+        fetchUserCategories(); 
+            
+        if (!needsNicknameSetupOnLoad) {
+            if (activeQuestionDataFromServer && activeQuestionDataFromServer.question) { 
+                console.log("Active question data found, re-rendering:", activeQuestionDataFromServer);
+                currentQuestionData = activeQuestionDataFromServer; 
+                renderQuestion(activeQuestionDataFromServer); 
+            } else {
+                console.log("User set up, no active question. UI should be in pre-game state.");
+            }
+        }
+        fetchStats(); 
+        fetchCalibrationData(); 
+    });
+</script>
 </body>
 </html>

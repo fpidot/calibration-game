@@ -1,79 +1,136 @@
-# AI Assistant Context for Wikipedia Calibration Game
+# Wikipedia Calibration Game: Project Plan
 
-**Project Goal:** Develop a Wikipedia-based Probabilistic Trivia/Calibration Game. Users answer multiple-choice questions generated from Wikipedia articles, provide a 0-100% confidence rating, and receive scores based on correctness and calibration (Brier score). Results are stored in a PostgreSQL database and displayed via session statistics and a Chart.js calibration curve. Question generation uses the Google Gemini API. An admin interface using Flask-Admin allows managing settings and viewing responses.
+**Project Goal:** Develop a Wikipedia-based Probabilistic Trivia/Calibration Game. Users answer multiple-choice questions generated from Wikipedia articles, provide a 0-100% confidence rating, and receive scores based on correctness and calibration (Brier score). Results are stored in a PostgreSQL database and displayed via session statistics and a Chart.js calibration curve. Question generation uses the Google Gemini API. An admin interface using Flask-Admin allows managing settings and viewing responses. Users will have persistent accounts to track their progress and compete on leaderboards.
+
+**Key Technologies:**
+*   **Backend:** Flask (Python)
+*   **Database:** PostgreSQL (with SQLAlchemy ORM and Flask-Migrate)
+*   **Frontend:** HTML, CSS, JavaScript, Chart.js
+*   **Admin:** Flask-Admin
+*   **AI for Q&A:** Google Gemini API
+*   **Environment:** Python virtual environment, `.env` for secrets
 
 **Key File Locations (in GitHub Repo Root):**
 *   `app.py`: Main Flask application, routes, game logic, session management.
-*   `models.py`: SQLAlchemy database model definitions (`AppSetting`, `Response`).
-*   `admin_views.py`: Flask-Admin view definitions (`AppSettingAdminView`, `ResponseAdminView`).
+*   `models.py`: SQLAlchemy database model definitions (`User`, `AppSetting`, `Response`).
+*   `admin_views.py`: Flask-Admin view definitions.
 *   `templates/index.html`: Main frontend HTML and JavaScript for the game UI.
 *   `templates/admin/appsetting_edit.html`: Custom template for editing `AppSetting` in Admin.
+*   `templates/login.html`, `templates/register.html`, `templates/profile.html`, `templates/leaderboard.html` (To be created)
 *   `requirements.txt`: Python dependencies.
 *   `migrations/`: Flask-Migrate database migration scripts.
-*   `.env.example`: Example for the `.env` file (actual `.env` is local and contains secrets).
+*   `.env.example`: Example for the `.env` file.
 
-**Current Status (End of Previous Chat - April 13, 2025):**
+---
 
-*   **Core Game Loop:** Functional.
-    *   Fetches Wikipedia articles using 'random', 'search', or 'category' strategies (configurable via Admin `AppSetting`).
-    *   Generates Q&A using Gemini API (parsing of Gemini response made more robust).
-    *   User can submit answers and confidence.
-    *   Brier score is calculated.
-    *   A gamified points score is calculated per question (based on correctness and confidence, configurable via `AppSetting`s like `score_base_correct`, `score_mult_correct`, etc.).
-    *   Responses (including points and Brier score) are saved to the PostgreSQL database.
-*   **Session Management & Stats:**
-    *   A robust `initialize_session_stats()` function in `app.py` ensures all necessary keys are present in `session['stats']`.
-    *   Frontend (`index.html`) displays:
-        *   Questions Answered (Session total).
-        *   Correct Answers (Session total) & Accuracy (%).
-        *   "Avg Brier Score (Game)" - Resets each game.
-        *   "Avg Brier Score (Session)" - Accumulates across games in the browser session.
-        *   "Current Game Score" (cumulative points for the current game).
-        *   "Question X / Y" (progress in the current game, Y is `game_length` from settings).
-        *   "Games Played (Session)".
-        *   "Average Game Score (Session)".
-    *   Calibration chart (`Chart.js`) displays binned data (Avg Confidence vs. Accuracy per bin), with point size reflecting count in bin.
-*   **Finite Game Loop:**
-    *   `game_length` is configurable in Admin.
-    *   Game ends after `game_length` questions.
-    *   "Game Over!" message displayed with final game score and game Brier score.
-    *   "Get New Question" button changes to "Play Again?".
-    *   "Play Again?" button calls `/start_new_game` backend route, which resets per-game stats (current game score, questions this game, game Brier scores, confidence levels for chart, correctness for chart) and increments `games_played_session`, and stores `completed_game_scores_session`.
-*   **Admin Interface (`Flask-Admin`):**
-    *   `/admin` is functional.
-    *   `AppSetting` view allows viewing and editing settings (using a custom template `appsetting_edit.html`). Editing settings (both text and the `page_selection_strategy` which *should* be a dropdown but currently renders as a text box due to complexities with the custom template) works without errors.
-    *   `Response` view is read-only for submitted answers.
-*   **Confidence Default:** Frontend slider defaults to 25%.
-*   **Question Skipping (Partial):**
-    *   "Get New Question" button is correctly disabled when a question is active and re-enabled after an answer (unless game over).
+## Current Implemented Features (as of May 23, 2025)
 
-**Deferred / Incomplete Items from Recent Discussions:**
+**I. Core Game Loop:**
+*   Dynamic question generation from Wikipedia articles using the Gemini API.
+*   Multiple-choice question presentation.
+*   User input for answer and 0-100% confidence.
+*   Scoring:
+    *   Brier score calculated per question.
+    *   Gamified points system based on correctness and confidence (configurable via Admin).
+*   Database storage (`Response` model) for each answer, including question details, user answer, confidence, correctness, Brier score, points, and game category.
+*   Finite game length (configurable via `AppSetting` `game_length`).
+    *   "Game Over" display with final game score and average Brier score for the game.
+    *   "Play Again?" functionality resets game-specific stats.
 
-*   **Admin Dropdown for `page_selection_strategy`:** The custom template `appsetting_edit.html` renders this as a text box. While editing works, it's not the desired dropdown. This was deferred due to complexity in getting it to render correctly without breaking the edit functionality.
-*   **Re-displaying Active Question on Page Refresh (Point c):** The backend (`/` route) passes `active_question_data`, but the `DOMContentLoaded` in `index.html` currently advises the user to click "Get New Question" to resync, rather than auto-rendering the question. This was simplified to avoid complex frontend/backend state synchronization on refresh for now.
+**II. Session Management & UI:**
+*   Session-based tracking of game statistics (`total_answered`, `total_correct`, `brier_scores`, `game_brier_scores`, `confidence_levels`, `correctness`, `cumulative_score` for current game, `questions_this_game`, `games_played_session`, `completed_game_scores_session`).
+*   Frontend display of current session and current game statistics.
+*   Calibration chart (Chart.js) displaying binned confidence vs. accuracy for the current game.
+*   Button text changes dynamically ("Begin Game", "Get Next Question", "Play Again?").
+*   Active question re-displayed on page refresh (preventing easy skipping).
 
-**Overall Desired Functionality / Gameplan (from User's List - To Be Addressed Next):**
+**III. User Category Selection:**
+*   Users can select a game category from a predefined list (admin-set via `AppSetting` `user_selectable_categories`) or enter a freeform topic.
+*   Freeform topics are standardized by the Gemini API into a thematic category name.
+*   The chosen/processed category guides Wikipedia page selection for question generation.
+*   The active `game_category` is displayed to the user during the question and stored with each `Response`.
 
-1.  **(DONE-ish)** **Default Confidence 25%** - Implemented.
-2.  **(SKIPPED BY USER)** **Auto-Next Question** - User decided against this.
-3.  **(LARGELY DONE)** **Finite Game (X Questions)** - Implemented. Minor UI polish or stat display at end of game might be desired.
-4.  **User Category Selection:** Allow player to select a category for their game.
-    *   From a predefined list (admin-set).
-    *   OR freeform text parsed by the app (normalized, shown to user).
-    *   Category-specific stats/leaderboards.
-5.  **(DONE-ish)** **Quit Game Button:** A `/start_new_game` route exists which serves a similar purpose for "Play Again?". A dedicated "Quit" that just resets might be slightly different or could reuse this.
-6.  **User Management & Persistence (Major Feature):**
-    *   Track/manage users (session token initially).
-    *   Randomly selected, jaunty nickname/handle, editable by player before game start.
-    *   Nickname uniqueness.
-    *   Optional email entry/confirmation for returning users (persistent accounts).
-    *   Cumulative stats (across all true lifetime games for a known user) vs. individual games.
-    *   Stats broken out by category played.
-7.  **(V1 DONE)** **Gamified Scoring:** Points system based on confidence/correctness is implemented. Cumulative score for game is tracked.
+**IV. Basic User Identification (Nickname Choice):**
+*   New users are presented with a suggested "jaunty" nickname.
+*   Users can accept the suggestion or enter their own custom nickname before their first game.
+*   Nickname uniqueness is checked against the database.
+*   A `User` record (with `id` and `nickname`) is created upon nickname confirmation.
+*   All subsequent game actions (`Response` records) are linked to this `user_id`.
+*   The user's nickname is displayed in the UI.
+*   Game actions are blocked until a nickname is set.
 
-**Planned Next Steps (From AI before chat ended):**
+**V. Administration (`Flask-Admin`):**
+*   Functional `/admin` interface.
+*   `AppSetting` view: Allows viewing and editing of all application settings.
+    *   Custom edit template (`appsetting_edit.html`) used.
+    *   `page_selection_strategy` setting rendered as a dropdown.
+*   `Response` view: Read-only view of all submitted responses, showing user nickname and game category.
+*   `User` view: Read-only view of created users and their nicknames.
 
-The immediate next steps were to focus on the remaining items from the user's list, likely starting with more advanced User Category Selection (#4) or starting the foundational work for User Management (#6) as it impacts many other "lifetime" stat features and leaderboards.
+---
 
-**AI's Task in Next Chat:**
-Based on this context, review the current state and work with the user to implement the remaining features, prioritizing based on user preference. A good next candidate would be User Category Selection (#4) or beginning the foundational elements of User Management (#6) such as basic user identification in the session.
+## Planned Future Development Roadmap
+
+**Phase 1: User Account Persistence & Management (Current Focus)**
+*   **Sub-Phase 1.1: Registration (Email/Password)**
+    *   **Task:** Allow users to "claim" their existing nickname/progress by associating it with an email and password.
+    *   **Details:**
+        *   Enhance `User` model: `email` (unique, indexed), `password_hash`, `email_confirmed_at` (nullable), `created_at`, `last_login_at`.
+        *   Create `/register` route and `register.html` template.
+        *   Implement Flask-WTF form for email, password, password confirmation. Nickname can be pre-filled if registering an existing session's user.
+        *   Implement password hashing (e.g., `werkzeug.security`).
+        *   Update existing `User` record or create new if truly new registration.
+        *   Log user in upon successful registration (update session).
+*   **Sub-Phase 1.2: Login/Logout**
+    *   **Task:** Enable returning users to log in.
+    *   **Details:**
+        *   Create `/login` route and `login.html` template with Flask-WTF form.
+        *   Implement login logic (verify email/password_hash).
+        *   Update session on login (`user_id`, `nickname`, clear setup flags).
+        *   Create `/logout` route to clear user-specific session data.
+        *   Update UI with Login/Logout/Register links.
+*   **Sub-Phase 1.3: "Forgot Password" (Stretch Goal for this phase)**
+    *   Generate password reset tokens, email them, allow password update.
+
+**Phase 2: Enhanced User Profile & Statistics**
+*   **Task:** Create a user profile page displaying detailed statistics.
+*   **Details:**
+    *   `/profile` route (requires login).
+    *   Display lifetime aggregate stats (total games, total Qs, overall accuracy, overall avg. Brier, avg. game score per game).
+    *   Display category-specific lifetime stats (accuracy, Brier, games played, avg score per category).
+    *   Potentially list recent game history with scores.
+    *   `profile.html` template.
+
+**Phase 3: Leaderboards**
+*   **Task:** Implement public leaderboards.
+*   **Details:**
+    *   `/leaderboard` route.
+    *   Define ranking metrics (e.g., avg game score over min X games, highest total score, best calibration over min X questions).
+    *   Implement DB queries for ranking.
+    *   Filters: Overall, Per Category, Time-based (All-time, Monthly).
+    *   `leaderboard.html` template.
+
+**Phase 4: UI/UX Polish & Refinements**
+*   **Task:** Improve overall user experience.
+*   **Details:**
+    *   AJAX-ify nickname setting for smoother UX (no full reload if possible).
+    *   More granular error handling and feedback.
+    *   Visual improvements, mobile responsiveness.
+    *   Review and refine gamification aspects.
+
+**Phase 5: Advanced Features & Maintenance**
+*   **Task:** Consider further enhancements.
+*   **Details:**
+    *   Email confirmation for new registrations.
+    *   User avatars.
+    *   "Challenge a friend" or social sharing (very advanced).
+    *   Regular maintenance, dependency updates, bug fixes.
+
+---
+
+## Deferred / Technical Debt / Minor Issues to Revisit
+
+*   **Admin Dropdown for `page_selection_strategy`:** While the custom template aims for a dropdown, confirm it robustly handles all edit/display scenarios without degrading to a text box. (README_AI_CONTEXT mentioned it was fixed, confirm this).
+*   **Robustness of Gemini Q&A Parsing:** Continuously monitor and improve if new unparseable formats emerge.
+*   **Scalability of Leaderboard Queries:** If user base grows, leaderboard queries might need optimization (caching, denormalization).
+*   **Error Handling in `get_wikipedia_page`:** Make failure modes more graceful (e.g., if a chosen category consistently yields no usable pages).

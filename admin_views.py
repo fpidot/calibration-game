@@ -1,6 +1,7 @@
 # admin_views.py
 
 from flask_admin.contrib.sqla import ModelView
+from flask_admin.model.fields import InlineFieldList
 from flask import session, flash, redirect, url_for, request
 # Import WTForms components for custom form
 from flask_wtf import FlaskForm
@@ -8,7 +9,7 @@ from wtforms.fields import SelectField, TextAreaField, StringField, HiddenField
 from wtforms.validators import DataRequired, Optional
 
 # Import your models
-from models import AppSetting, Response
+from models import AppSetting, Response, User
 
 
 
@@ -93,16 +94,65 @@ class AppSettingAdminView(ModelView):
     def inaccessible_callback(self, name, **kwargs):
         flash('You are not authorized...', 'warning'); return redirect(url_for('index'))
 
-# --- Response View (Keep as before) ---
+def user_nickname_formatter(view, context, model, name):
+    """
+    Formatter function to display user nickname in Response list view.
+    `view` is the current administrative view.
+    `context` is an Jinja2 context.
+    `model` is the model object.
+    `name` is the name of the property to retrieve.
+    """
+    if model.user:  # 'user' is the relationship attribute in Response model
+        return model.user.nickname
+    return "N/A (No User)"
+
+
 class ResponseAdminView(ModelView):
-    """Read-only Admin view for Response model."""
-    can_create = False; can_edit = False; can_delete = False
-    column_list = ('timestamp','wiki_page_title','user_answer','correct_answer','is_correct','user_confidence','brier_score','session_id')
-    column_filters = ('is_correct', 'wiki_page_title', 'timestamp', 'user_confidence')
-    column_searchable_list = ('wiki_page_title', 'question_text', 'session_id')
+    can_create = False
+    can_edit = False
+    can_delete = False
+    
+    column_list = (
+        'timestamp', 'user', 'wiki_page_title', 'user_answer', 
+        'correct_answer', 'is_correct', 'user_confidence', 
+        'brier_score', 'game_category'
+    )
+    
+    # Use the new function formatter
+    column_formatters = {
+        'user': user_nickname_formatter  # Assign the function directly
+    }
+    
+    column_filters = ('is_correct', 'wiki_page_title', 'timestamp', 'user_confidence', 'game_category', 'user.nickname')
+    column_searchable_list = ('wiki_page_title', 'question_text', 'user.nickname', 'game_category')
     column_default_sort = ('timestamp', True)
-    column_labels = { 'timestamp': 'Time', 'wiki_page_title': 'Article', 'user_answer': 'User Ans', 'correct_answer': 'Correct Ans', 'is_correct': 'Correct?', 'user_confidence': 'Confidence', 'brier_score': 'Brier Score', 'session_id': 'Session/User ID' }
+    
+    column_labels = { 
+        'timestamp': 'Time', 
+        'user': 'User Nickname', # This 'user' key matches the field in column_list
+        'wiki_page_title': 'Article', 
+        'user_answer': 'User Ans', 
+        'correct_answer': 'Correct Ans', 
+        'is_correct': 'Correct?', 
+        'user_confidence': 'Confidence', 
+        'brier_score': 'Brier Score', 
+        'game_category': 'Game Category'
+    }
     page_size = 100
-    def is_accessible(self): return True
+
+    def is_accessible(self): return True # Add your access control
+    def inaccessible_callback(self, name, **kwargs):
+        flash('You are not authorized...', 'warning'); return redirect(url_for('index'))
+
+
+class UserAdminView(ModelView):
+    column_list = ('id', 'nickname', 'created_at')
+    column_searchable_list = ('nickname',)
+    column_filters = ('created_at',)
+    can_edit = False 
+    can_create = False 
+    page_size = 100
+
+    def is_accessible(self): return True # Add your access control
     def inaccessible_callback(self, name, **kwargs):
         flash('You are not authorized...', 'warning'); return redirect(url_for('index'))

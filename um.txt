@@ -1,0 +1,75 @@
+Remaining User Management & Related Features: Gameplan
+Here's a breakdown of the remaining user management features and a high-level plan. We'll build these incrementally.
+Phase UM2: Core Account Persistence (Optional Email/Password Registration & Login)
+Goal: Allow users to create persistent accounts to save their progress across sessions/devices.
+Features:
+User Model Enhancement:
+Add email (unique, indexed, lowercase).
+Add password_hash.
+Add email_confirmed_at (DateTime, nullable).
+Add last_login_at (DateTime, nullable).
+Registration:
+A new /register route and template.
+Form for current nickname (if new user in setup phase), email, and password.
+If a user is in the needs_nickname_setup state, their chosen/suggested nickname from that phase can pre-fill the registration form.
+If an existing user (with just a nickname) wants to register, they can associate their current user_id/nickname with an email/password.
+Password hashing (e.g., using werkzeug.security).
+Email uniqueness check.
+On successful registration, update the User record, log them in (update session).
+Login:
+A new /login route and template.
+Form for email and password.
+Verify credentials.
+On success, populate session['user_id'], session['nickname'], clear needs_nickname_setup, and update last_login_at.
+Logout:
+A new /logout route.
+Clear all user-specific session keys (user_id, nickname, needs_nickname_setup, suggested_nickname).
+The next interaction will trigger the ensure_user_session_initialized flow for a new guest/setup.
+UI Elements: Add "Register", "Login", "Logout", "Profile" links to the base layout/navigation.
+High-Level Plan:
+Update models.py (User model). Run migrations.
+Create Flask-WTF forms for registration and login.
+Implement /register, /login, /logout routes in app.py.
+Implement password hashing/checking.
+Modify ensure_user_session_initialized to better handle transitions between guest, nickname setup, and fully logged-in states.
+Update index.html and create login.html, register.html templates.
+Phase UM3: User Profile Page & Basic Lifetime Stats
+Goal: Allow logged-in users to see their accumulated statistics.
+Features:
+A new /profile route (requires login).
+Display lifetime stats: total questions answered, total correct, overall accuracy, overall average Brier score, total games played, average game score.
+High-Level Plan:
+Create /profile route in app.py.
+Add DB query logic in the /profile route to calculate lifetime stats for the logged-in user from the Response table (and potentially aggregate game scores from session['stats']['completed_game_scores_session'] if we decide to persist that data more formally or link it to users).
+Create profile.html template.
+Phase UM4: Category-Specific Stats on Profile Page
+Goal: Enhance the profile page with stats broken down by game category.
+Features:
+On the /profile page, show a breakdown of stats (accuracy, Brier, games played, avg score) for each game_category the user has played.
+Potentially highlight their "best" or "most played" categories.
+High-Level Plan:
+Extend the DB query logic in the /profile route to group by game_category for the logged-in user.
+Update profile.html template to display this tabular/listed data.
+Phase UM5: Public Leaderboards (Optional, can be later)
+Goal: Display game-wide leaderboards.
+Features:
+A new /leaderboard route.
+Display top users based on defined metrics (e.g., highest average game score over N games, highest cumulative lifetime score, best average Brier score over N games). Requires careful definition of "score" for ranking.
+Filters for "All Time" vs. "This Month" (requires using Response.timestamp).
+Filters for "Overall" vs. specific "Game Category".
+High-Level Plan:
+Create /leaderboard route.
+Implement complex database queries for ranking and filtering. This might require optimization (e.g., denormalized summary tables or materialized views if performance becomes an issue with many users/responses).
+Create leaderboard.html template.
+Phase UM6: Email Confirmation (Optional, Security Enhancement)
+Goal: Verify user email addresses.
+Features:
+Generate unique confirmation tokens.
+Send confirmation emails upon registration.
+A route to handle token verification and update User.email_confirmed_at.
+Potentially restrict some features until email is confirmed.
+High-Level Plan:
+Choose a token generation library (e.g., itsdangerous).
+Set up Flask-Mail (or other email sending solution).
+Implement token generation, email sending, and verification logic.
+This is a comprehensive set of features. We would tackle them one phase (or even sub-feature) at a time.
