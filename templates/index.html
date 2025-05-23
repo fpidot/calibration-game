@@ -25,10 +25,10 @@
         #loading { display: none; font-style: italic; color: #555; }
         #error-message { color: red; margin-top: 10px; font-weight: bold; }
         .wiki-link { font-size: 0.9em; color: #555; margin-left: 5px; }
+        .game-over-message { font-weight: bold; margin-top: 10px; }
     </style>
 </head>
 <body>
-
     <h1>Wikipedia Calibration Game</h1>
 
     <div id="game-area">
@@ -38,9 +38,7 @@
         <div id="question-container" style="display: none;">
             <p id="question-text"></p>
             <a id="wiki-link" href="#" target="_blank" class="wiki-link" style="display: none;"></a>
-            <div id="options-container">
-                <ul></ul>
-            </div>
+            <div id="options-container"><ul></ul></div>
             <div id="confidence-section">
                 <label for="confidence">Confidence (0-100%): </label>
                 <input type="range" id="confidence" name="confidence" min="0" max="100" value="25">
@@ -54,14 +52,15 @@
 
     <div id="stats-container">
         <h2>Session Statistics</h2>
-        <p>Questions Answered (Overall): <span id="stat-answered">0</span></p> {/* Clarify this is overall */}
-        <p>Correct Answers (Overall): <span id="stat-correct">0</span> (<span id="stat-accuracy">N/A</span>%)</p>
-        <p>Average Brier Score: <span id="stat-avg-brier">N/A</span></p>
-        <p>Current Game Score: <span id="stat-total-score">0</span></p> {/* Clarify this is current game score */}
-        <p>Question: <span id="stat-game-progress">0</span> / <span id="stat-game-length">20</span></p>
-        <div id="calibration-chart-container">
-            <canvas id="calibrationChart"></canvas>
-        </div>
+        <p>Questions Answered (Session): <span id="stat-answered">0</span></p>
+        <p>Correct Answers (Session): <span id="stat-correct">0</span> (<span id="stat-accuracy">N/A</span>%)</p>
+        <p>Average Brier Score (Game): <span id="stat-game-avg-brier">N/A</span></p>
+        <p>Average Brier Score (Session): <span id="stat-session-avg-brier">N/A</span></p>
+        <p>Current Game Score: <span id="stat-total-score">0</span></p>
+        <p>Question: <span id="stat-game-progress">0</span> / <span id="stat-game-length">N/A</span></p>
+        <p>Games Played (Session): <span id="stat-games-played">0</span></p>
+        <p>Average Game Score (Session): <span id="stat-avg-game-score">N/A</span></p>
+        <div id="calibration-chart-container"><canvas id="calibrationChart"></canvas></div>
     </div>
 
     <script>
@@ -82,14 +81,18 @@
         const statAnswered = document.getElementById('stat-answered');
         const statCorrect = document.getElementById('stat-correct');
         const statAccuracy = document.getElementById('stat-accuracy');
-        const statAvgBrier = document.getElementById('stat-avg-brier');
+        const statGameAvgBrier = document.getElementById('stat-game-avg-brier');
+        const statSessionAvgBrier = document.getElementById('stat-session-avg-brier');
         const statTotalScore = document.getElementById('stat-total-score');
         const statGameProgress = document.getElementById('stat-game-progress');
         const statGameLength = document.getElementById('stat-game-length');
+        const statGamesPlayed = document.getElementById('stat-games-played');
+        const statAvgGameScore = document.getElementById('stat-avg-game-score');
         const calibrationChartCtx = document.getElementById('calibrationChart').getContext('2d');
 
         // Game State
-        let currentQuestionData = null;
+        let currentQuestionData = null; // This will be the data from /get_trivia_question
+        let activeQuestionFromServer = null; // Stores question passed from server on page load
         let selectedAnswer = null;
         let calibrationChart = null;
         const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
@@ -97,251 +100,191 @@
         // --- Utility Functions ---
         function showLoading() { loadingElement.style.display = 'block'; errorMessageElement.textContent = ''; }
         function hideLoading() { loadingElement.style.display = 'none'; }
-        function showQuestion() { questionContainer.style.display = 'block'; }
-        // function hideQuestion() { questionContainer.style.display = 'none'; } // We keep question visible after answer
+        function showQuestionUi() { questionContainer.style.display = 'block'; }
+        function hideQuestionUi() { questionContainer.style.display = 'none'; } // Renamed for clarity
         function displayError(message) { errorMessageElement.textContent = message; console.error("Displaying Error:", message); }
         function clearError() { errorMessageElement.textContent = ''; }
 
         // --- Core Game Logic ---
-        function fetchNewQuestion() {
+        function renderQuestion(questionData) {
+            currentQuestionData = questionData; // Set global currentQuestionData
+            console.log("Rendering question:", currentQuestionData);
 
-            if (newQuestionButton.textContent === 'Play Again?') {
-                startNewGame();
-                return; 
+            questionTextElement.textContent = currentQuestionData.question;
+            wikiLinkElement.href = currentQuestionData.wiki_page_url;
+            wikiLinkElement.textContent = `(Source: ${currentQuestionData.wiki_page_title})`;
+            wikiLinkElement.style.display = 'inline';
+            optionsElement.innerHTML = '';
+
+            if (typeof currentQuestionData.options !== 'object' || currentQuestionData.options === null) {
+                 console.error('ERROR: currentQuestionData.options is not an object!', currentQuestionData.options);
+                 displayError('Received invalid question options format.'); return;
             }
-            showLoading();
-            questionContainer.style.display = 'none'; // Hide old question area before fetching new
-            clearError();
-
-            fetch('/get_trivia_question')
-                .then(response => {
-                    if (!response.ok) {
-                         return response.json().then(errData => { throw new Error(errData.error || `HTTP error ${response.status}`); });
+            try {
+                const optionLetters = Object.keys(currentQuestionData.options);
+                optionLetters.sort(() => Math.random() - 0.5); // Shuffle for display
+                optionLetters.forEach(letter => {
+                    if (currentQuestionData.options.hasOwnProperty(letter)) {
+                        const text = currentQuestionData.options[letter];
+                        const li = document.createElement('li');
+                        const button = document.createElement('button');
+                        button.textContent = `${letter}) ${text}`;
+                        button.classList.add('option-button');
+                        button.dataset.answerLetter = letter;
+                        button.onclick = () => {
+                            const currentlySelected = optionsElement.querySelector('.selected');
+                            if (currentlySelected) currentlySelected.classList.remove('selected');
+                            button.classList.add('selected');
+                            selectedAnswer = letter;
+                            submitButton.disabled = false;
+                        };
+                        li.appendChild(button); optionsElement.appendChild(li);
                     }
-                    return response.json();
-                })
-                .then(data => {
-                    hideLoading();
-                    if (data.error) {
-                        displayError(data.error);
-                        return;
-                    }
-                    currentQuestionData = data;
-                    console.log("Received data for question:", currentQuestionData);
-
-                    questionTextElement.textContent = currentQuestionData.question;
-                    wikiLinkElement.href = currentQuestionData.wiki_page_url;
-                    wikiLinkElement.textContent = `(Source: ${currentQuestionData.wiki_page_title})`;
-                    wikiLinkElement.style.display = 'inline';
-                    optionsElement.innerHTML = '';
-
-                    console.log('Attempting to process options:', currentQuestionData.options);
-                    if (typeof currentQuestionData.options !== 'object' || currentQuestionData.options === null) {
-                         console.error('ERROR: currentQuestionData.options is not an object!', currentQuestionData.options);
-                         displayError('Received invalid question options format.');
-                         return;
-                    }
-                    try {
-                        const optionLetters = Object.keys(currentQuestionData.options);
-                        optionLetters.sort(() => Math.random() - 0.5);
-                        optionLetters.forEach(letter => {
-                            if (currentQuestionData.options.hasOwnProperty(letter)) {
-                                const text = currentQuestionData.options[letter];
-                                const li = document.createElement('li');
-                                const button = document.createElement('button');
-                                button.textContent = `${letter}) ${text}`;
-                                button.classList.add('option-button');
-                                button.dataset.answerLetter = letter;
-                                button.onclick = () => {
-                                    const currentlySelected = optionsElement.querySelector('.selected');
-                                    if (currentlySelected) currentlySelected.classList.remove('selected');
-                                    button.classList.add('selected');
-                                    selectedAnswer = letter;
-                                    submitButton.disabled = false;
-                                };
-                                li.appendChild(button);
-                                optionsElement.appendChild(li);
-                            }
-                        });
-                    } catch (loopError) {
-                        console.error("Error creating option buttons:", loopError);
-                        console.error("Data during error:", currentQuestionData.options);
-                        displayError("Error displaying question options.");
-                        return;
-                    }
-                    resultElement.textContent = '';
-                    resultElement.className = '';
-                    newQuestionButton.textContent = 'Get New Question';
-                    document.getElementById('confidence-section').style.display = 'block';
-                    submitButton.style.display = 'inline-block';
-                    submitButton.disabled = true;
-                    confidenceSlider.value = 25; // Reset confidence
-                    confidenceValueElement.textContent = '25%';
-                    selectedAnswer = null;
-                    showQuestion();
-                })
-                .catch(error => {
-                    console.error('Error fetching or processing question:', error);
-                    displayError(error.message || 'Failed to fetch question. Please try again.');
-                    hideLoading();
                 });
+            } catch (loopError) { console.error("Error creating option buttons:", loopError); displayError("Error displaying options."); return; }
+
+            resultElement.textContent = ''; resultElement.className = '';
+            submitButton.disabled = true;
+            confidenceSlider.value = 25; confidenceValueElement.textContent = '25%';
+            selectedAnswer = null;
+            document.getElementById('confidence-section').style.display = 'block';
+            submitButton.style.display = 'inline-block';
+            newQuestionButton.disabled = true; // Disable "Get New Question" when a question is active (Point c)
+            showQuestionUi();
         }
 
-                function startNewGame() {
-            console.log("Starting a new game...");
-            fetch('/start_new_game', { method: 'POST' }) // Create this route in app.py
-                .then(response => response.json())
+        function fetchNewQuestion() {
+            if (newQuestionButton.textContent === 'Play Again?') { startNewGame(); return; }
+
+            showLoading(); hideQuestionUi(); clearError();
+            newQuestionButton.disabled = true; // Disable while fetching
+
+            fetch('/get_trivia_question')
+                .then(response => { if (!response.ok) { return response.json().then(errData => { throw new Error(errData.error || `HTTP error ${response.status}`); }); } return response.json(); })
                 .then(data => {
-                    if (data.status === 'success') {
-                        console.log("New game started, session reset by backend.");
-                        updateStats(data.new_stats); // Update UI with fresh stats from backend
-                        fetchCalibrationData(); // Refetch to clear chart with new data
-                        newQuestionButton.textContent = 'Get New Question';
-                        document.getElementById('confidence-section').style.display = 'block';
-                        submitButton.style.display = 'inline-block';
-                        fetchNewQuestion(); // Now fetch the first question
-                    } else {
-                        displayError("Could not start a new game.");
-                    }
+                    hideLoading();
+                    if (data.error) { displayError(data.error); newQuestionButton.disabled = false; return; } // Re-enable button on error
+                    renderQuestion(data); // Use the new renderQuestion function
                 })
                 .catch(error => {
-                    console.error('Error starting new game:', error);
-                    displayError("Error starting new game.");
+                    console.error('Error fetching question:', error); displayError(error.message || 'Failed to fetch Q.');
+                    hideLoading(); newQuestionButton.disabled = false; // Re-enable button on error
                 });
         }
 
         function submitAnswer() {
             if (!selectedAnswer) return;
             const confidence = parseInt(confidenceSlider.value, 10);
-            showLoading();
-            clearError();
+            showLoading(); clearError();
 
-            fetch('/submit_answer', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ answer: selectedAnswer, confidence: confidence })
-            })
-            .then(response => {
-                if (!response.ok) {
-                    return response.json().then(errData => { throw new Error(errData.error || `HTTP error ${response.status}`); });
-                }
-                return response.json();
-            })
-            .then(resultData => {
-                hideLoading();
-                if (resultData.error){
-                     displayError(resultData.error);
-                     return;
-                }
+            fetch('/submit_answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer: selectedAnswer, confidence: confidence }) })
+                .then(response => { if (!response.ok) { return response.json().then(errData => { throw new Error(errData.error || `HTTP error ${response.status}`); }); } return response.json(); })
+                .then(resultData => {
+                    hideLoading();
+                    if (resultData.error){ displayError(resultData.error); return; }
 
-                let feedbackText = `Result: ${resultData.result}. Correct Answer: ${resultData.correct_answer}) ${resultData.correct_answer_text}.`;
-                feedbackText += ` Brier Score: ${resultData.brier_score}.`;
-                if (resultData.points_awarded !== undefined && resultData.points_awarded !== null) {
-                     feedbackText += ` Points: ${resultData.points_awarded.toFixed(1)}`;
-                }
-                console.log("Final feedbackText to be displayed:", feedbackText);
-                console.log("resultData object:", JSON.stringify(resultData, null, 2));
+                    let feedbackText = `Result: ${resultData.result}. Correct Answer: ${resultData.correct_answer}) ${resultData.correct_answer_text}.`;
+                    feedbackText += ` Brier Score: ${resultData.brier_score.toFixed(3)}.`; // Format Brier
+                    if (resultData.points_awarded !== undefined && resultData.points_awarded !== null) {
+                         feedbackText += ` Points: ${resultData.points_awarded.toFixed(1)}`;
+                    }
+                    console.log("Final feedbackText:", feedbackText); console.log("resultData object:", JSON.stringify(resultData, null, 2));
+                    resultElement.textContent = feedbackText; resultElement.className = resultData.result;
+                    // showQuestionUi(); // Already visible, result is inside question container
 
-                resultElement.textContent = feedbackText;
-                resultElement.className = resultData.result;
-                showQuestion(); // Ensure question area (and result div) is visible
+                    const buttons = optionsElement.querySelectorAll('.option-button');
+                    buttons.forEach(button => {
+                        button.disabled = true; const btnLetter = button.dataset.answerLetter;
+                        if (btnLetter === resultData.correct_answer) button.classList.add('correct');
+                        else if (btnLetter === selectedAnswer) button.classList.add('incorrect');
+                        button.classList.remove('selected');
+                    });
 
-                const buttons = optionsElement.querySelectorAll('.option-button');
-                buttons.forEach(button => {
-                    button.disabled = true;
-                    const btnLetter = button.dataset.answerLetter;
-                    if (btnLetter === resultData.correct_answer) button.classList.add('correct');
-                    else if (btnLetter === selectedAnswer) button.classList.add('incorrect');
-                    button.classList.remove('selected');
-                });
+                    updateStats(resultData.new_stats, "submitAnswer");
+                    fetchCalibrationData(); // This also calls updateStats, ensure no race conditions
+                    submitButton.disabled = true;
 
-                updateStats(resultData.new_stats); // This will update the total score display
-                fetchCalibrationData();
-                // submitButton.disabled = true;
-                if (resultData.end_of_game) {
-                resultElement.innerHTML += "<br><b>Game Over! Final Score: " + resultData.new_stats.cumulative_score.toFixed(1) + "</b>";
-                newQuestionButton.textContent = 'Play Again?';
-                // Optionally hide the confidence slider and submit button completely
-                document.getElementById('confidence-section').style.display = 'none';
-                submitButton.style.display = 'none';
-                // Do NOT automatically fetch a new question here.
-            } else {
-                // If game is not over, re-enable "Get New Question" functionality implicitly
-                // The current setup already allows clicking "Get New Question"
-                submitButton.disabled = true; // Keep disabled until next question options are chosen
-            }
-            })
-            .catch(error => {
-                console.error('Error submitting answer:', error);
-                displayError(error.message || 'Failed to submit answer.');
-                hideLoading();
-            });
+                    if (resultData.end_of_game) {
+                        let gameBrierForDisplay = "N/A";
+                        if (resultData.new_stats.game_brier_scores && resultData.new_stats.game_brier_scores.length > 0) {
+                             gameBrierForDisplay = (resultData.new_stats.game_brier_scores.reduce((a,b)=>a+b,0) / resultData.new_stats.game_brier_scores.length).toFixed(3);
+                        }
+                        resultElement.innerHTML += `<br><div class="game-over-message">Game Over! Final Score: ${resultData.new_stats.cumulative_score.toFixed(1)}. Avg Brier (This Game): ${gameBrierForDisplay}</div>`;
+                        newQuestionButton.textContent = 'Play Again?';
+                        newQuestionButton.disabled = false; // Enable "Play Again?"
+                        document.getElementById('confidence-section').style.display = 'none';
+                        submitButton.style.display = 'none';
+                    } else {
+                        newQuestionButton.disabled = false; // Re-enable "Get New Question" for next round (Point c)
+                    }
+                })
+                .catch(error => { console.error('Error submitting answer:', error); displayError(error.message || 'Failed to submit.'); hideLoading(); newQuestionButton.disabled = false; });
         }
 
-        function updateStats(stats) {
-            console.log("updateStats called with stats:", JSON.stringify(stats, null, 2));
-            if (!stats) { console.error("updateStats called with null or undefined stats object."); return; }
+        function startNewGame() {
+            console.log("Starting new game..."); showLoading();
+            fetch('/start_new_game', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        console.log("New game session from backend:", data.new_stats);
+                        updateStats(data.new_stats, "startNewGame_backend");
+                        fetchCalibrationData(); // Update chart with cleared game data
+                        newQuestionButton.textContent = 'Get New Question';
+                        // fetchNewQuestion will be called after this by user click or auto-logic if added
+                        // For now, let's fetch the first question of the new game
+                        fetchNewQuestion();
+                    } else { displayError("Could not start new game."); hideLoading(); }
+                })
+                .catch(error => { console.error('Error starting new game:', error); displayError("Error starting new game."); hideLoading(); });
+        }
+
+
+        function updateStats(stats, source = "unknown") { // Added source for easier debugging
+            console.log(`updateStats called FROM ${source} with stats:`, JSON.stringify(stats, null, 2));
+            if (!stats) { console.error(`updateStats (from ${source}) called with null/undefined stats.`); return; }
 
             statAnswered.textContent = stats.total_answered !== undefined ? stats.total_answered : '0';
             statCorrect.textContent = stats.total_correct !== undefined ? stats.total_correct : '0';
             const accuracy = (stats.total_answered && stats.total_answered > 0 && stats.total_correct !== undefined)
-                ? ((stats.total_correct / stats.total_answered) * 100).toFixed(1)
-                : 'N/A';
+                ? ((stats.total_correct / stats.total_answered) * 100).toFixed(1) : 'N/A';
             statAccuracy.textContent = accuracy;
-            const avgBrier = (stats.brier_scores && stats.brier_scores.length > 0)
-                ? (stats.brier_scores.reduce((a, b) => a + b, 0) / stats.brier_scores.length).toFixed(3)
-                : 'N/A';
-            statAvgBrier.textContent = avgBrier;
+
+            const gameAvgBrier = (stats.game_brier_scores && stats.game_brier_scores.length > 0)
+                ? (stats.game_brier_scores.reduce((a, b) => a + b, 0) / stats.game_brier_scores.length).toFixed(3) : 'N/A';
+            statGameAvgBrier.textContent = gameAvgBrier;
+
+            const sessionAvgBrier = (stats.brier_scores && stats.brier_scores.length > 0)
+                ? (stats.brier_scores.reduce((a, b) => a + b, 0) / stats.brier_scores.length).toFixed(3) : 'N/A';
+            statSessionAvgBrier.textContent = sessionAvgBrier;
 
             if (stats.hasOwnProperty('cumulative_score') && stats.cumulative_score !== null) {
                 let score = parseFloat(stats.cumulative_score);
-                if (!isNaN(score)) {
-                    statTotalScore.textContent = score.toFixed(1); // This should now work
-                    console.log("Cumulative score updated to:", score.toFixed(1));
-                } else {
-                    console.error("Cumulative score is not a valid number:", stats.cumulative_score);
-                    statTotalScore.textContent = 'Error';
-                }
-            } else {
-                console.log("Cumulative score not found or is null in stats object. Defaulting display to 0.");
-                statTotalScore.textContent = '0';
-            }
-            if (stats.hasOwnProperty('questions_this_game')) {
-                statGameProgress.textContent = stats.questions_this_game;
-            } else {
-                statGameProgress.textContent = '0';
-            }
-                         if (stats.hasOwnProperty('game_length_setting')) { // Assuming backend sends this
-                statGameLength.textContent = stats.game_length_setting;
-             } else {
-                 statGameLength.textContent = 'N/A'; // Or a default like 20
-             }
+                if (!isNaN(score)) { statTotalScore.textContent = score.toFixed(1); console.log(`Cumulative score updated to: ${score.toFixed(1)} (Source: ${source})`);}
+                else { console.error(`Cumulative score NaN: ${stats.cumulative_score} (Source: ${source})`); statTotalScore.textContent = 'Error'; }
+            } else { console.log(`Cumulative score not found/null. Defaulting to 0. (Source: ${source})`); statTotalScore.textContent = '0'; }
+
+            statGameProgress.textContent = stats.questions_this_game !== undefined ? stats.questions_this_game : '0';
+            statGameLength.textContent = stats.game_length_setting !== undefined ? stats.game_length_setting : 'N/A';
+            statGamesPlayed.textContent = stats.games_played_session !== undefined ? stats.games_played_session : '0';
+
+            const avgGameScore = (stats.completed_game_scores_session && stats.completed_game_scores_session.length > 0)
+                ? (stats.completed_game_scores_session.reduce((a,b) => a + b, 0) / stats.completed_game_scores_session.length).toFixed(1) : 'N/A';
+            statAvgGameScore.textContent = avgGameScore;
         }
 
-        function fetchStats() {
-            fetch(`/get_stats?session_id=${sessionId}`)
-                .then(response => response.json())
-                .then(stats => updateStats(stats))
-                .catch(error => console.error('Error fetching stats:', error));
-        }
-
-         function fetchCalibrationData() {
-            fetch(`/get_calibration_data?session_id=${sessionId}`)
-                .then(response => response.json())
-                .then(data => {
-                    console.log("Calibration data received:", data);
-                    renderCalibrationChart(data);
-                })
-                .catch(error => console.error('Error fetching calibration data:', error));
-        }
+        function fetchStats() { fetch(`/get_stats?session_id=${sessionId}`).then(r => r.json()).then(s => updateStats(s, "fetchStats_initial")).catch(e => console.error('Error fetching stats:', e)); }
+        function fetchCalibrationData() { fetch(`/get_calibration_data?session_id=${sessionId}`).then(r => r.json()).then(d => renderCalibrationChart(d)).catch(e => console.error('Error fetching calibration data:', e)); }
+        // In index.html
 
         function renderCalibrationChart(data) {
             const points = data.points || [];
             console.log("Rendering calibration chart with points:", points);
             const chartData = points.map(p => ({ x: p.x, y: p.y }));
             const counts = points.map(p => p.count);
-            const maxCount = Math.max(1, ...counts);
-            const minRadius = 3; const maxRadius = 15;
+            const maxCount = Math.max(1, ...counts); // Avoid division by 0 if counts is empty
+            const minRadius = 3;
+            const maxRadius = 15;
             const pointRadii = points.map(p => {
                 if (p.count <= 0) return minRadius;
                 let radius = minRadius + (maxRadius - minRadius) * Math.sqrt(p.count / maxCount);
@@ -358,26 +301,112 @@
                 console.log("Creating new calibration chart.");
                 calibrationChart = new Chart(calibrationChartCtx, {
                     type: 'scatter',
-                    data: { datasets: [ { label: 'Calibration Bins', data: chartData, backgroundColor: 'rgba(0, 0, 255, 0.7)', borderColor: 'rgba(0, 0, 255, 1)', pointRadius: pointRadii, pointHoverRadius: pointRadii.map(r => r + 2), order: 2 }, { label: 'Perfect Calibration', data: perfectLine, type: 'line', borderColor: 'rgba(200, 200, 200, 0.8)', borderWidth: 2, pointRadius: 0, fill: false, tension: 0, order: 1 } ] },
-                    options: { scales: { x: { type: 'linear', position: 'bottom', title: { display: true, text: 'Average Confidence in Bin (%)' }, min: 0, max: 100 }, y: { title: { display: true, text: 'Accuracy (Proportion Correct)' }, min: 0, max: 1.0 } }, plugins: { tooltip: { callbacks: { label: function(context) { if (context.datasetIndex === 0) { const pointIndex = context.dataIndex; const originalPoint = points[pointIndex]; if (!originalPoint) return "Data point error"; let label = ` Bin ${pointIndex + 1}:`; label += ` Avg Confidence: ${originalPoint.x.toFixed(1)}%`; label += `, Accuracy: ${(originalPoint.y * 100).toFixed(1)}%`; label += ` (Count: ${originalPoint.count})`; return label; } else { return null; } } } }, legend: { display: true } }, responsive: true, maintainAspectRatio: true }
-                });
+                    data: {
+                        datasets: [
+                            {
+                                label: 'Calibration Bins',
+                                data: chartData,
+                                backgroundColor: 'rgba(0, 0, 255, 0.7)',
+                                borderColor: 'rgba(0, 0, 255, 1)',
+                                pointRadius: pointRadii,
+                                pointHoverRadius: pointRadii.map(r => r + 2),
+                                order: 2
+                            },
+                            {
+                                label: 'Perfect Calibration',
+                                data: perfectLine,
+                                type: 'line',
+                                borderColor: 'rgba(200, 200, 200, 0.8)',
+                                borderWidth: 2,
+                                pointRadius: 0,
+                                fill: false,
+                                tension: 0,
+                                order: 1
+                            }
+                        ]
+                    },
+                    options: { // This is the options object literal
+                        scales: {
+                            x: {
+                                type: 'linear',
+                                position: 'bottom',
+                                title: { display: true, text: 'Average Confidence in Bin (%)' },
+                                min: 0,
+                                max: 100
+                            },
+                            y: {
+                                title: { display: true, text: 'Accuracy (Proportion Correct)' },
+                                min: 0,
+                                max: 1.0
+                            }
+                        },
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        if (context.datasetIndex === 0) {
+                                            const pointIndex = context.dataIndex;
+                                            const originalPoint = points[pointIndex];
+                                            if (!originalPoint) return "Data point error";
+                                            let label = ` Bin ${pointIndex + 1}:`;
+                                            label += ` Avg Confidence: ${originalPoint.x.toFixed(1)}%`;
+                                            label += `, Accuracy: ${(originalPoint.y * 100).toFixed(1)}%`;
+                                            label += ` (Count: ${originalPoint.count})`;
+                                            return label;
+                                        } else {
+                                            return null; // No tooltip for the perfect line
+                                        }
+                                    }
+                                }
+                            },
+                            legend: {
+                                display: true
+                            }
+                        },
+                        responsive: true,
+                        maintainAspectRatio: true
+                    } // End of options object
+                }); // End of new Chart call
             }
         }
 
         // --- Event Listeners ---
         newQuestionButton.addEventListener('click', fetchNewQuestion);
         submitButton.addEventListener('click', submitAnswer);
-        confidenceSlider.addEventListener('input', (e) => {
-            confidenceValueElement.textContent = `${e.target.value}%`;
-        });
+        confidenceSlider.addEventListener('input', (e) => { confidenceValueElement.textContent = `${e.target.value}%`; });
 
-        // Initial load
+            // Initial load
         document.addEventListener('DOMContentLoaded', () => {
-             fetchStats(); // This will call updateStats, which will try to update total score
-             fetchCalibrationData();
+            // Get the raw string output from Jinja, hopefully as a valid JSON string or the string 'null'
+            const activeQuestionJsonString = '{{ active_question_data | tojson | safe if active_question_data else "null" }}';
+            let serverPassedQuestionData = null;
+
+            // console.log("Raw activeQuestionJsonString from server:", activeQuestionJsonString); // Debug the raw string
+
+            if (activeQuestionJsonString && activeQuestionJsonString !== 'null') {
+                try {
+                    serverPassedQuestionData = JSON.parse(activeQuestionJsonString);
+                } catch (e) {
+                    console.error("Error parsing activeQuestionJsonString:", e);
+                    console.error("Raw string was:", activeQuestionJsonString); // Log the problematic string
+                    // It's possible that 'tojson | safe' already produced a JS object, not a string.
+                    // This can happen if the template isn't wrapped in JS quotes correctly at the point of injection.
+                    // However, our current setup passes it into a JS string ('...')
+                }
+            }
+
+            if (serverPassedQuestionData) {
+                console.log("Active question data found from server on page load:", serverPassedQuestionData);
+                // As discussed, we are not auto-rendering the question on refresh to simplify state.
+                // User will click "Get New Question".
+                // If you wanted to render it:
+                // renderQuestion(serverPassedQuestionData);
+                // newQuestionButton.disabled = true;
+            }
+
+            fetchStats();
+            fetchCalibrationData();
         });
-
     </script>
-
 </body>
 </html>
