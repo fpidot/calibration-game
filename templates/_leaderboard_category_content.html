@@ -1,0 +1,80 @@
+{# templates/_leaderboard_category_content.html #}
+<h4 style="margin-bottom: 15px;">Leaderboard for: {{ category_name_display }}</h4>
+
+<div>
+    <h5>Top Game Scores in {{ category_name_display }}</h5>
+    <table class="leaderboard-table">
+        <thead>
+            <tr>
+                <th>Rank</th>
+                <th>Nickname</th>
+                <th>Game Score</th>
+                <th>Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in cat_top_game_scores %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td>{{ row.nickname }}</td>
+                <td>{{ "%.1f"|format(row.game_score) }}</td>
+                <td>{{ row.completed_at.strftime('%Y-%m-%d') if row.completed_at else 'N/A' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" style="text-align:center;">No game scores recorded yet for this category.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div style="margin-top: 25px;">
+    <h5>Best Game Calibration (Avg. Brier) in {{ category_name_display }} <small>(min. {{ get_setting('leaderboard_min_games_for_category_ranking', 3) }} games in cat.)</small></h5>
+    <table class="leaderboard-table">
+        <thead>
+            <tr>
+                <th>Rank</th>
+                <th>Nickname</th>
+                <th>Avg. Game Brier (in Cat)</th>
+                <th>Games in Category</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in cat_best_game_briers %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td>{{ row.nickname }}</td>
+                <td>{{ "%.3f"|format(row.avg_game_brier_in_cat) }}</td>
+                <td>{{ row.num_games_in_cat }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" style="text-align:center;">Not enough data for Brier ranking in this category.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div style="margin-top: 25px;">
+    <h5>Highest Accuracy in {{ category_name_display }} <small>(min. {{ get_setting('leaderboard_min_games_for_category_ranking', 3) * get_setting('game_length', 20) }} questions in cat.)</small></h5>
+    <table class="leaderboard-table">
+        <thead>
+            <tr>
+                <th>Rank</th>
+                <th>Nickname</th>
+                <th>Accuracy (in Cat)</th>
+                <th>Questions in Category</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in cat_top_accuracy %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td>{{ row.nickname }}</td>
+                <td>{{ "%.1f"|format(row.accuracy_in_cat) }}%</td>
+                <td>{{ row.questions_in_cat }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" style="text-align:center;">Not enough data for accuracy ranking in this category.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>

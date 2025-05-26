@@ -1,0 +1,24 @@
+<table class="leaderboard-table">
+<thead>
+<tr>
+<th>Rank</th>
+<th>Nickname</th>
+<th>Best Game Avg. Brier</th>
+<th>Category</th>
+<th>Date</th>
+</tr>
+</thead>
+<tbody>
+{% for row in top_single_game_briers %}
+<tr>
+<td>{{ loop.index }}</td>
+<td>{{ row.nickname }}</td>
+<td>{{ "%.3f"|format(row.game_brier) }}</td>
+<td>{{ row.game_category or "General Knowledge" }}</td>
+<td>{{ row.completed_at.strftime('%Y-%m-%d') }}</td>
+</tr>
+{% else %}
+<tr><td colspan="5" style="text-align:center;">No completed games with Brier scores recorded yet.</td></tr>
+{% endfor %}
+</tbody>
+</table>

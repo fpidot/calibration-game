@@ -1,0 +1,95 @@
+<!-- templates/base.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Wikipedia Calibration Game{% endblock %}</title>
+    <style>
+        /* Basic Nav Styling */
+        .navbar { background-color: #f8f9fa; padding: 0.5rem 1rem; margin-bottom: 1rem; border-bottom: 1px solid #dee2e6;}
+        .navbar ul { list-style-type: none; margin: 0; padding: 0; display: flex; align-items: center; /* For vertical alignment */ }
+        .navbar li { margin-right: 15px; } /* Increased margin a bit */
+        .navbar a { text-decoration: none; color: #007bff; padding: 5px 0; } /* Added some padding for better click area */
+        .navbar a:hover { text-decoration: underline; }
+        .navbar .user-greeting { margin-left: auto; color: #6c757d; padding-right: 1rem; } /* Ensure it's pushed right */
+
+        /* Basic Alert Styling (if not using Bootstrap or for fallback) */
+        .alert {
+            padding: 0.75rem 1.25rem;
+            margin-bottom: 1rem;
+            border: 1px solid transparent;
+            border-radius: 0.25rem;
+        }
+        .alert-success {
+            color: #155724;
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+        }
+        .alert-danger {
+            color: #721c24;
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+        }
+        .alert-info {
+            color: #0c5460;
+            background-color: #d1ecf1;
+            border-color: #bee5eb;
+        }
+        .alert-default { /* A general fallback style */
+            color: #383d41;
+            background-color: #e2e3e5;
+            border-color: #d6d8db;
+        }
+        .container { padding-top: 10px; }
+    </style>
+     {% block head_extra %}{% endblock %}
+</head>
+<body>
+<nav class="navbar">
+    <ul>
+        <li><a href="{{ url_for('index') }}">Home</a></li>
+        <li><a href="{{ url_for('leaderboard') }}">Leaderboard</a></li>
+        {% if current_user.is_authenticated %}
+            <li><a href="{{ url_for('profile') }}">Profile</a></li>
+            <li><a href="{{ url_for('logout') }}">Logout</a></li>
+        {% else %}
+            <li><a href="{{ url_for('login') }}">Login</a></li>
+            <li><a href="{{ url_for('register') }}">Register</a></li>
+        {% endif %}
+
+        {% if current_user.is_authenticated %}
+            <li class="user-greeting">Hello, {{ current_user.nickname }}!</li>
+        {% elif session.get('suggested_nickname') and session.get('needs_nickname_setup') %}
+             <li class="user-greeting">Welcome! (Setup: {{ session.get('suggested_nickname') }})</li>
+        {% else %}
+             <li class="user-greeting">Welcome, Guest!</li>
+        {% endif %}
+    </ul>
+</nav>
+
+    <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    {# Assign a base class 'alert' and then a category-specific class #}
+                    <div class="alert alert-{{ category if category in ['success', 'danger', 'info'] else 'default' }}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+    </div>
+     {% block scripts %}
+     {% endblock %}
+<hr style="margin-top: 30px;">
+<footer style="text-align: center; padding: 20px 0; font-size: 0.9em; color: #666;">
+    <p>
+        Wikipedia Calibration Game © {{ current_year }} 
+        | <a href="{{ url_for('submit_feedback') }}">Submit Feedback</a>
+        {# | <a href="#">About</a> | <a href="#">Privacy Policy</a> #}
+    </p>
+</footer>
+</body>
+</html>

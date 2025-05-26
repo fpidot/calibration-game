@@ -1,0 +1,22 @@
+<table class="leaderboard-table">
+<thead>
+<tr>
+<th>Rank</th>
+<th>Nickname</th>
+<th>Total Lifetime Score</th>
+<th>Total Questions Answered</th>
+</tr>
+</thead>
+<tbody>
+{% for row in top_lifetime_scores %}
+<tr>
+<td>{{ loop.index }}</td>
+<td>{{ row.nickname }}</td>
+<td>{{ "%.1f"|format(row.total_score_val) }}</td>
+<td>{{ row.total_questions_answered }}</td>
+</tr>
+{% else %}
+<tr><td colspan="4" style="text-align:center;">No data yet to display.</td></tr>
+{% endfor %}
+</tbody>
+</table>

@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title or "Leaderboards" }}{% endblock %}
+
+{% block head_extra %}
+    {{ super() }}
+    <style>
+        /* Basic Tab Styling */
+        .leaderboard-nav-tabs {
+            display: flex;
+            list-style: none;
+            padding-left: 0;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .leaderboard-nav-tabs .nav-item {
+            margin-bottom: -1px; /* Overlap border */
+        }
+        .leaderboard-nav-tabs .nav-link {
+            display: block;
+            padding: 0.5rem 1rem;
+            border: 1px solid transparent;
+            border-top-left-radius: 0.25rem;
+            border-top-right-radius: 0.25rem;
+            color: #007bff;
+            text-decoration: none;
+        }
+        .leaderboard-nav-tabs .nav-link:hover,
+        .leaderboard-nav-tabs .nav-link:focus {
+            border-color: #e9ecef #e9ecef #dee2e6;
+        }
+        .leaderboard-nav-tabs .nav-link.active {
+            color: #495057;
+            background-color: #fff;
+            border-color: #dee2e6 #dee2e6 #fff;
+        }
+        .leaderboard-tab-content .tab-pane {
+            display: none; /* Hidden by default */
+        }
+        .leaderboard-tab-content .tab-pane.active {
+            display: block; /* Shown when active */
+        }
+
+        /* Table styling (can reuse from index if consistent or define separately) */
+        .leaderboard-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            font-size: 0.9em;
+        }
+        .leaderboard-table th, .leaderboard-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .leaderboard-table th {
+            background-color: #f2f2f2;
+        }
+        .leaderboard-table tr:nth-child(even){background-color: #f9f9f9;}
+
+        #category-links-container a {
+            display: inline-block;
+            padding: 5px 10px;
+            margin: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            text-decoration: none;
+            background-color: #f0f0f0;
+        }
+        #category-links-container a:hover {
+            background-color: #e0e0e0;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1>Leaderboards</h1>
+    <hr>
+
+    <ul class="leaderboard-nav-tabs" id="leaderboardTabs">
+        <li class="nav-item"><button class="nav-link active" data-tab-target="#lifetimeScorePane">Top Lifetime Scores</button></li>
+        <li class="nav-item"><button class="nav-link" data-tab-target="#lifetimeAccuracyPane">Top Lifetime Accuracy</button></li>
+        <li class="nav-item"><button class="nav-link" data-tab-target="#lifetimeBrierPane">Best Lifetime Calibration</button></li>
+        <li class="nav-item"><button class="nav-link" data-tab-target="#bestGameScorePane">Best Game Scores</button></li>
+        <li class="nav-item"><button class="nav-link" data-tab-target="#bestGameBrierPane">Best Game Calibration</button></li>
+        <li class="nav-item"><button class="nav-link" data-tab-target="#byCategoryPane">By Category</button></li>
+    </ul>
+
+    <div class="leaderboard-tab-content">
+        <div class="tab-pane active" id="lifetimeScorePane">
+            <h3>Top Lifetime Scores</h3>
+            {% include '_leaderboard_table_lifetime_score.html' %}
+        </div>
+        <div class="tab-pane" id="lifetimeAccuracyPane">
+            <h3>Top Lifetime Accuracy <small>(min. {{ get_setting('leaderboard_min_games_for_lifetime_ranking', 3) * get_setting('game_length',20) }} questions)</small></h3>
+            {% include '_leaderboard_table_lifetime_accuracy.html' %}
+        </div>
+        <div class="tab-pane" id="lifetimeBrierPane">
+            <h3>Best Lifetime Calibration (Avg. Brier) <small>(min. {{ get_setting('leaderboard_min_games_for_lifetime_ranking', 3) * get_setting('game_length',20) }} questions)</small></h3>
+            {% include '_leaderboard_table_lifetime_brier.html' %}
+        </div>
+        <div class="tab-pane" id="bestGameScorePane">
+            <h3>Best Single Game Scores</h3>
+            {% include '_leaderboard_table_game_score.html' %}
+        </div>
+        <div class="tab-pane" id="bestGameBrierPane">
+            <h3>Best Single Game Calibration (Avg. Brier)</h3>
+            {% include '_leaderboard_table_game_brier.html' %}
+        </div>
+        <div class="tab-pane" id="byCategoryPane">
+            <h3>Leaderboards by Category</h3>
+            <p>Select a category to view its leaderboard. Categories shown have at least {{ get_setting('leaderboard_min_games_for_category_leaderboard', 1) }} completed game(s) recorded.</p>
+            <div id="category-links-container">
+                {% if eligible_categories %}
+                    {% for cat in eligible_categories %}
+                        <div> {# Wrap each category line for better structure #}
+                            {# Link to view leaderboard #}
+                            <a href="{{ url_for('leaderboard_category', category_name=cat.name) }}" class="category-link" data-category-name="{{ cat.name }}">{{ cat.name }} ({{cat.count}} games)</a>
+                            
+                            {# Button/Link to play this category - NOW AN <a> TAG #}
+                            {% set play_link_params = {} %}
+                            {% if cat.name.startswith('Custom: ') %}
+                                {% set _ = play_link_params.update({'user_category_custom': cat.name.replace('Custom: ', '', 1)}) %}
+                            {% else %}
+                                {% set _ = play_link_params.update({'user_category_prefab': cat.name}) %}
+                            {% endif %}
+                            <a href="{{ url_for('index', **play_link_params) }}" 
+                            class="btn btn-sm btn-outline-secondary" 
+                            style="margin-left: 10px; font-size: 0.8em;">Play This Category</a>
+                        </div>
+                        <hr style="margin: 5px 0;"> {# Simple separator #}
+                    {% endfor %}
+                {% else %}
+                    <p>No categories currently meet the criteria for individual leaderboards.</p>
+                {% endif %}
+            </div>
+            <div id="category-leaderboard-content" style="margin-top:20px; border: 1px solid #eee; padding: 10px; min-height: 100px;">
+                <p><em>Select a category above to load its leaderboard.</em></p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const tabs = document.querySelectorAll('#leaderboardTabs .nav-link');
+    const tabPanes = document.querySelectorAll('.leaderboard-tab-content .tab-pane');
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', function (event) {
+            event.preventDefault();
+            
+            tabs.forEach(t => t.classList.remove('active'));
+            tabPanes.forEach(tp => tp.classList.remove('active')); // Simpler: just remove active
+
+            this.classList.add('active');
+            const targetPaneId = this.getAttribute('data-tab-target');
+            document.querySelector(targetPaneId).classList.add('active');
+        });
+    });
+
+    // AJAX for category leaderboards
+    const categoryLinksContainer = document.getElementById('category-links-container');
+    const categoryLeaderboardContent = document.getElementById('category-leaderboard-content');
+
+    if (categoryLinksContainer && categoryLeaderboardContent) {
+        categoryLinksContainer.addEventListener('click', function(event) {
+            const link = event.target.closest('a.category-link'); // Handle clicks on text inside <a>
+            if (link) {
+                event.preventDefault();
+                const categoryUrl = link.href; 
+                categoryLeaderboardContent.innerHTML = '<p>Loading leaderboard...</p>';
+                
+                fetch(categoryUrl)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP error ${response.status} fetching category leaderboard.`);
+                        }
+                        return response.text();
+                    })
+                    .then(html => {
+                        categoryLeaderboardContent.innerHTML = html;
+                    })
+                    .catch(error => {
+                        console.error('Error fetching category leaderboard:', error);
+                        categoryLeaderboardContent.innerHTML = '<p>Could not load leaderboard for this category. Please try again.</p>';
+                    });
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

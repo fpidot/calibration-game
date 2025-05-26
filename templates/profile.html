@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}My Profile{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h2>My Profile</h2>
+    <hr>
+    {% if current_user.is_authenticated %}
+        <p><strong>Nickname:</strong> {{ current_user.nickname }}</p>
+        <p><strong>Email:</strong> {{ current_user.email }}</p>
+        <p><strong>Member Since:</strong> {{ current_user.created_at.strftime('%Y-%m-%d') if current_user.created_at else 'N/A' }}</p>
+        <p><strong>Last Login:</strong> {{ current_user.last_login_at.strftime('%Y-%m-%d %H:%M:%S UTC') if current_user.last_login_at else 'N/A' }}</p>
+        
+        <hr>
+        <p><em>More profile information and statistics will be available here soon.</em></p>
+        {# Add link to change password or nickname later #}
+
+    {% else %}
+        <p>You need to be logged in to view this page. <a href="{{ url_for('login') }}">Login here</a>.</p>
+    {% endif %}
+</div>
+{% endblock %}

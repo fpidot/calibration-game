@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title or "Reset Your Password" }}{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row">
+        <div class="col-md-6 col-md-offset-3">
+            <h2>{{ title }}</h2>
+            <hr>
+            <p>Please enter your new password below.</p>
+            {# The action URL needs the token to be passed back to the same route on POST #}
+            <form method="POST" action="{{ url_for('reset_token', token=token) }}" novalidate>
+                {{ form.hidden_tag() }} {# CSRF token #}
+                
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    {{ form.password.label(class="form-control-label") }}
+                    {% if form.password.errors %}
+                        {{ form.password(class="form-control form-control-lg is-invalid") }}
+                        <div class="invalid-feedback" style="color: red; font-size: 0.875em;">
+                            {% for error in form.password.errors %}
+                                <span>{{ error }}</span><br>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        {{ form.password(class="form-control form-control-lg") }}
+                    {% endif %}
+                </div>
+
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    {{ form.confirm_password.label(class="form-control-label") }}
+                    {% if form.confirm_password.errors %}
+                        {{ form.confirm_password(class="form-control form-control-lg is-invalid") }}
+                        <div class="invalid-feedback" style="color: red; font-size: 0.875em;">
+                            {% for error in form.confirm_password.errors %}
+                                <span>{{ error }}</span><br>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        {{ form.confirm_password(class="form-control form-control-lg") }}
+                    {% endif %}
+                </div>
+                
+                <div class="form-group">
+                    {{ form.submit(class="btn btn-primary btn-lg") }}
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

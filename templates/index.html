@@ -1,9 +1,9 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wikipedia Calibration Game</title>
+{% extends "base.html" %}
+
+{% block title %}Wikipedia Calibration Game{% endblock %}
+
+{% block head_extra %}
+    {{ super() }} 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <style>
@@ -40,11 +40,62 @@
         .game-over-message { font-weight: bold; margin-top: 10px; }
         #displayed-category { 
             font-size: 0.9em; color: #555; margin-bottom: 10px; 
-            font-style: italic; border-bottom: 1px solid #eee; padding-bottom: 5px;
-        } /* Corrected: Removed extra closing brace from here */
+            font-style: italic; border-bottom: 1px solid #eee; padding-bottom: 5px;}
+        .hidden { display: none !important; } 
+        #nickname-setup-area, #pre-game-options { 
+            margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; 
+            border-radius: 5px; background-color: #f0f0f0;
+        }
+                #category-stats-container { 
+            margin-top: 30px; 
+            padding: 15px; 
+            border: 1px solid #ddd; 
+            border-radius: 5px; 
+            background-color: #fdfdfd; 
+        }
+        #category-stats-container h2 {
+            margin-top: 0;
+        }
+        .stats-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        .stats-table th, .stats-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .stats-table th {
+            background-color: #f2f2f2;
+        }
+        .stats-table tr:nth-child(even){background-color: #f9f9f9;}
+        .stats-table tr:hover {background-color: #efefef;}
+        .stats-table th[data-sort-by] {
+            cursor: pointer;
+        }
+        .stats-table th[data-sort-by]:hover {
+            background-color: #e0e0e0;
+        }
+        .stats-table .sort-arrow {
+            font-size: 0.8em;
+            margin-left: 5px;
+        }
+        .option-button.correct { 
+            background-color: #90ee90; /* Light green */
+            border-color: #3cb371; 
+            color: #155724; /* Darker green text for contrast */
+        }
+        .option-button.incorrect { 
+            background-color: #f08080; /* Light red */
+            border-color: #cd5c5c; 
+            color: #721c24; /* Darker red text */
+        }
+
     </style>
-</head>
-<body>
+{% endblock %}
+
+{% block content %}
 
 <div id="user-info-display" style="text-align: right; margin-bottom: 10px; font-size: 0.9em;">
     Playing as: <strong id="user-nickname-text">Guest</strong>
@@ -72,6 +123,8 @@
     </div>
 </div>
 
+<div id="complete-registration-prompt" class="hidden" style="padding: 10px; margin-bottom: 15px; background-color: #fff3cd; border: 1px solid #ffeeba; color: #856404; border-radius: .25rem; text-align: center;"></div>
+
 <h1>Wikipedia Calibration Game</h1>
 
 <div id="game-area" class="hidden"> <!-- Initially hidden if nickname setup is needed -->
@@ -94,18 +147,176 @@
 </div>
 
 <div id="stats-container">
-     <h2>Session Statistics</h2>
-    <p>Questions Answered (Session): <span id="stat-answered">0</span></p>
-    <p>Correct Answers (Session): <span id="stat-correct">0</span> (<span id="stat-accuracy">N/A</span>%)</p>
-    <p>Average Brier Score (Game): <span id="stat-game-avg-brier">N/A</span></p>
-    <p>Average Brier Score (Session): <span id="stat-session-avg-brier">N/A</span></p>
-    <p>Current Game Score: <span id="stat-total-score">0</span></p>
-    <p>Question: <span id="stat-game-progress">0</span> / <span id="stat-game-length">N/A</span></p>
-    <p>Games Played (Session): <span id="stat-games-played">0</span></p>
-    <p>Average Game Score (Session): <span id="stat-avg-game-score">N/A</span></p>
+    {% if current_user.is_authenticated %}
+        <h2>Lifetime Statistics</h2>
+        {# --- Overall Lifetime Stats for Logged-in User --- #}
+        {% if overall_lifetime_stats %}
+            <h4>Overall Performance</h4>
+            <p>Total Questions Answered: <span id="lifetime-stat-answered">{{ overall_lifetime_stats.total_questions }}</span></p>
+            <p>Total Correct Answers: <span id="lifetime-stat-correct">{{ overall_lifetime_stats.total_correct }}</span> (<span id="lifetime-stat-accuracy">{{ overall_lifetime_stats.accuracy }}</span>%)</p>
+            <p>Overall Average Brier Score: <span id="lifetime-stat-avg-brier">{{ "%.3f"|format(overall_lifetime_stats.average_brier) if overall_lifetime_stats.average_brier is not none else 'N/A' }}</span></p>
+            <p>Total Lifetime Points: <span id="lifetime-stat-total-points">{{ overall_lifetime_stats.total_points }}</span></p>
+            <hr>
+        {% endif %}
+
+        {% if personal_best_game_score or personal_best_game_brier %}
+            <h4>Personal Best Games</h4>
+            <ul style="list-style-type: none; padding-left: 0;">
+                {% if personal_best_game_score %}
+                <li>
+                    <strong>Highest Scoring Game:</strong> {{ "%.1f"|format(personal_best_game_score.score) }}
+                    (Category: {{ personal_best_game_score.category }}, 
+                    On: {{ personal_best_game_score.date.strftime('%b %d, %Y') }})
+                </li>
+                {% endif %}
+                {% if personal_best_game_brier %}
+                <li style="margin-top: 5px;">
+                    <strong>Best Calibrated Game (Lowest Brier):</strong> {{ "%.3f"|format(personal_best_game_brier.brier) }}
+                    (Category: {{ personal_best_game_brier.category }}, 
+                    Score: {{ "%.1f"|format(personal_best_game_brier.score_in_that_game) }},
+                    On: {{ personal_best_game_brier.date.strftime('%b %d, %Y') }})
+                </li>
+                {% endif %}
+            </ul>
+            <hr>
+        {% endif %}
+
+        {# --- Current Game Progress (from session, for logged-in user) --- #}
+        {% if current_game_progress_stats %}
+            <h4>Current Game</h4>
+            <p>Score This Game: <span id="stat-total-score">{{ "%.1f"|format(current_game_progress_stats.current_game_score) }}</span></p>
+            <p>Question: <span id="stat-game-progress">{{ current_game_progress_stats.questions_this_game }}</span> / <span id="stat-game-length">{{ current_game_progress_stats.game_length_setting }}</span></p>
+            {# Add current game avg brier if desired: calculate from session['stats']['game_brier_scores'] in Python and pass #}
+            <hr>
+        {% endif %}
+
+    {% elif session_stats_for_guest %} {# Guest or Nickname-only User - Display Session Stats #}
+        <h2>Your Current Statistics</h2>
+        <p>Questions Answered (This Session): <span id="stat-answered">{{ session_stats_for_guest.total_answered }}</span></p>
+        <p>Correct Answers (This Session): <span id="stat-correct">{{ session_stats_for_guest.total_correct }}</span> (<span id="stat-accuracy">{{ (session_stats_for_guest.total_correct / session_stats_for_guest.total_answered * 100)|round(1,'floor') if session_stats_for_guest.total_answered > 0 else 'N/A' }}</span>%)</p>
+        <p>Average Brier Score (Current Game): <span id="stat-game-avg-brier">{{ ("%.3f"|format(session_stats_for_guest.game_brier_scores|sum / session_stats_for_guest.game_brier_scores|length)) if session_stats_for_guest.game_brier_scores else 'N/A' }}</span></p>
+        <p>Average Brier Score (This Session): <span id="stat-session-avg-brier">{{ ("%.3f"|format(session_stats_for_guest.brier_scores|sum / session_stats_for_guest.brier_scores|length)) if session_stats_for_guest.brier_scores else 'N/A' }}</span></p>
+        <p>Score This Game: <span id="stat-total-score">{{ "%.1f"|format(session_stats_for_guest.cumulative_score) }}</span></p>
+        <p>Question: <span id="stat-game-progress">{{ session_stats_for_guest.questions_this_game }}</span> / <span id="stat-game-length">{{ get_setting('game_length', 20) }}</span></p> {# Fetch game_length setting #}
+        <p>Games Played (This Session): <span id="stat-games-played">{{ session_stats_for_guest.games_played_session }}</span></p>
+        {# Avg Game Score (Session) would require completed_game_scores_session #}
+        <hr>
+    {% endif %}
+    <div id="calibration-chart-controls" style="margin-top:10px; margin-bottom:10px;">
+    <label for="chart-bins-select">Chart Bins:</label>
+    <select id="chart-bins-select">
+            <option value="5">5 Bins</option>
+            <option value="10" selected>10 Bins (Default)</option>
+            <option value="20">20 Bins</option>
+            <option value="50">50 Bins</option>
+    </select>
+</div>
     <div id="calibration-chart-container"><canvas id="calibrationChart"></canvas></div>
 </div>
 
+    {% if current_user.is_authenticated %}
+    <div id="category-stats-container"> {# A single container for all lifetime category info #}
+        <h2>Lifetime Performance by Category</h2>
+
+        {% if category_stats %}
+            {# Display the table of category stats #}
+        <table class="stats-table" id="categoryStatsTable">
+            <thead>
+                <tr>
+                    <th data-sort-by="category_name" data-sort-type="alpha">Category</th>
+                    <th data-sort-by="total_questions" data-sort-type="numeric">Questions</th>
+                    <th data-sort-by="total_correct" data-sort-type="numeric">Correct</th>
+                    <th data-sort-by="accuracy" data-sort-type="numeric">Accuracy</th>
+                    <th data-sort-by="average_brier" data-sort-type="numeric" class="sortable-header current-sort-asc">Avg. Brier <span class="sort-arrow">▲</span></th>
+                    <th data-sort-by="average_points" data-sort-type="numeric">Avg. Points</th>
+                    <th>Action</th> {# NEW COLUMN #}
+                </tr>
+            </thead>
+            <tbody>
+                {% for stat_item in category_stats %}
+                <tr>
+                    <td>{{ stat_item.category_name }}</td>
+                    <td>{{ stat_item.total_questions }}</td>
+                    <td>{{ stat_item.total_correct }}</td>
+                    <td>{{ stat_item.accuracy }}%</td>
+                    <td>{{ "%.3f"|format(stat_item.average_brier) if stat_item.average_brier is not none else 'N/A' }}</td>
+                    <td>{{ "%.1f"|format(stat_item.average_points) if stat_item.average_points is not none else 'N/A' }}</td>
+                    <td>
+                        {# Link will go to index, JS will pick up category and start game #}
+                        {# We need to handle "Custom: Topic" differently from prefab categories #}
+                        {% set category_param_name = 'user_category_prefab' %}
+                        {% set category_param_value = stat_item.category_name %}
+                        {% if stat_item.category_name.startswith('Custom: ') %}
+                            {# For custom categories, we'd ideally pass the original search term if we had it.
+                            Since we only have "Custom: Processed Theme", we can pass this as a custom search.
+                            The get_trivia_question route already handles 'user_category_custom'.
+                            Or, we treat "Custom: Processed Theme" as a prefab name if standardized names are unique.
+                            Let's assume for now 'user_category_custom' is better for these.
+                            #}
+                            {% set category_param_name = 'user_category_custom' %}
+                            {% set category_param_value = stat_item.category_name.replace('Custom: ', '', 1) %}
+                        {% endif %}
+                        <button class="btn btn-sm btn-outline-primary play-category-button" 
+                                data-category-type="{{ category_param_name }}" 
+                                data-category-value="{{ category_param_value }}">Play This</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+            {# Now, decide whether to show highlights OR the "play more for highlights" message #}
+            {% if best_brier_category or best_score_category %}
+                <div style="margin-top: 20px;">
+                    <h4>Category Highlights (min. {{ get_setting('min_questions_for_cat_rank', 5) }} questions per category):</h4>
+                    <ul style="list-style-type: none; padding-left: 0;">
+                        {% if best_brier_category %}
+                        <li>
+                            <strong>Best Calibration (Lowest Avg. Brier):</strong> 
+                            {{ best_brier_category.category_name }} 
+                            (Avg. Brier: {{ "%.3f"|format(best_brier_category.average_brier) }}, 
+                            {{ best_brier_category.total_questions }} questions)
+                        </li>
+                        {% endif %}
+                        {% if worst_brier_category and best_brier_category and worst_brier_category.category_name != best_brier_category.category_name %}
+                        <li>
+                            <strong>Highest Avg. Brier:</strong> 
+                            {{ worst_brier_category.category_name }} 
+                            (Avg. Brier: {{ "%.3f"|format(worst_brier_category.average_brier) }}, 
+                            {{ worst_brier_category.total_questions }} questions)
+                        </li>
+                        {% endif %}
+                        {% if best_score_category %}
+                        <li style="margin-top: 5px;">
+                            <strong>Highest Avg. Score:</strong> 
+                            {{ best_score_category.category_name }} 
+                            (Avg. Score: {{ "%.1f"|format(best_score_category.average_points) }}, 
+                            {{ best_score_category.total_questions }} questions)
+                        </li>
+                        {% endif %}
+                        {% if worst_score_category and best_score_category and worst_score_category.category_name != best_score_category.category_name %}
+                        <li>
+                            <strong>Lowest Avg. Score:</strong> 
+                            {{ worst_score_category.category_name }} 
+                            (Avg. Score: {{ "%.1f"|format(worst_score_category.average_points) }}, 
+                            {{ worst_score_category.total_questions }} questions)
+                        </li>
+                        {% endif %}
+                    </ul>
+                </div>
+            {% else %} {# This 'else' pairs with 'if best_brier_category or best_score_category' #}
+                 <p style="margin-top: 10px;"><em>Play more questions in categories (or at least {{ get_setting('min_questions_for_cat_rank', 5) }} per category) to see highlights here.</em></p>
+            {% endif %}
+
+        {% else %} {# This 'else' pairs with 'if category_stats' (i.e., user is authenticated but has NO category stats at all) #}
+            <p>No game data found yet for your account. Play some games to see your stats here!</p>
+        {% endif %}
+    </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+    {{ super() }}
 <script>
     // DOM Elements
     const gameArea = document.getElementById('game-area'); 
@@ -130,12 +341,123 @@
     const preGameOptionsDiv = document.getElementById('pre-game-options');
     const prefabCategorySelect = document.getElementById('prefab-category-select');
     const customCategoryInput = document.getElementById('custom-category-input');
+    const chartBinsSelect = document.getElementById('chart-bins-select');
 
     const statAnswered = document.getElementById('stat-answered'); const statCorrect = document.getElementById('stat-correct'); const statAccuracy = document.getElementById('stat-accuracy'); const statGameAvgBrier = document.getElementById('stat-game-avg-brier'); const statSessionAvgBrier = document.getElementById('stat-session-avg-brier'); const statTotalScore = document.getElementById('stat-total-score'); const statGameProgress = document.getElementById('stat-game-progress'); const statGameLength = document.getElementById('stat-game-length'); const statGamesPlayed = document.getElementById('stat-games-played'); const statAvgGameScore = document.getElementById('stat-avg-game-score'); const calibrationChartCtx = document.getElementById('calibrationChart').getContext('2d');
     
     let currentQuestionData = null; 
     let selectedAnswer = null;
     let calibrationChart = null;
+    let lastAnswerFeedbackFromServer = null;
+    let points = [];
+
+    function isGameInProgress() {
+        // Game is in progress if a question is loaded OR if feedback for an active (not ended) game is shown.
+        const gameNotEndedInFeedback = lastAnswerFeedbackFromServer && !lastAnswerFeedbackFromServer.end_of_game;
+        const inProgress = !!currentQuestionData || gameNotEndedInFeedback;
+        // console.log(`isGameInProgress: currentQ=${!!currentQuestionData}, feedbackActiveNotEnded=${gameNotEndedInFeedback}, result=${inProgress}`);
+        return inProgress;
+    }
+
+    function showPreGameOptions() {
+        if (preGameOptionsDiv) preGameOptionsDiv.classList.remove('hidden');
+        if (newQuestionButton) {
+            newQuestionButton.textContent = 'Begin Game';
+            newQuestionButton.disabled = false;
+            newQuestionButton.classList.remove('hidden');
+        }
+        if (questionContainer) questionContainer.style.display = 'none'; // Hide active question/feedback area
+        currentQuestionData = null; // No active question
+        lastAnswerFeedbackFromServer = null; // No active feedback
+        if (resultElement) resultElement.textContent = ''; // Clear result text
+        console.log("UI: Switched to Pre-Game Options state");
+    }
+
+
+    function displayAnswerFeedback(feedbackData) {
+    if (!feedbackData) return;
+
+    currentQuestionData = null; // No active question when showing feedback for previous one
+
+    // Set category display first
+    if (feedbackData.display_category_name && displayedCategoryElement) {
+        displayedCategoryElement.textContent = `Category: ${feedbackData.display_category_name}`;
+        displayedCategoryElement.style.display = 'block';
+    } else if (displayedCategoryElement) {
+        displayedCategoryElement.style.display = 'none'; // Hide if no category name
+    }
+
+    // Set the question text
+    questionTextElement.textContent = feedbackData.question_text || "Reviewing Answer"; // Show old question
+
+    // --- Re-render options with highlighting ---
+    optionsElement.innerHTML = ''; // Clear previous options ONCE before re-rendering
+    if (feedbackData.options && typeof feedbackData.options === 'object') {
+        const optionLetters = Object.keys(feedbackData.options).sort(); 
+        optionLetters.forEach(letter => {
+            if (feedbackData.options.hasOwnProperty(letter)) {
+                const text = feedbackData.options[letter];
+                const li = document.createElement('li');
+                const button = document.createElement('button');
+                button.textContent = `${letter}) ${text}`;
+                button.classList.add('option-button');
+                button.disabled = true; // Disable buttons in feedback mode
+
+                // Apply highlighting
+                if (letter === feedbackData.correct_answer_letter) {
+                    button.classList.add('correct');
+                } else if (feedbackData.user_answer_letter && letter === feedbackData.user_answer_letter) {
+                    // This condition implies it's the user's answer AND it's not the correct one (because the 'if correct' was first)
+                    // So, if it's the user's answer and it wasn't correct, mark it as incorrect.
+                    button.classList.add('incorrect'); 
+                }
+                // No other classes needed for options that were neither correct nor selected by user.
+
+                li.appendChild(button);
+                optionsElement.appendChild(li);
+            }
+        });
+    }
+    // --- Options are now rendered. Do NOT clear optionsElement.innerHTML again ---
+
+    // Set the main feedback text (result, Brier, points)
+    let feedbackText = `Result: ${feedbackData.result}. Correct Answer: ${feedbackData.correct_answer_letter}) ${feedbackData.correct_answer_text}. Brier Score: ${feedbackData.brier_score.toFixed(3)}.`;
+    if (feedbackData.points_awarded !== undefined && feedbackData.points_awarded !== null) {
+        feedbackText += ` Points: ${feedbackData.points_awarded.toFixed(1)}`;
+    }
+    resultElement.textContent = feedbackText;
+    resultElement.className = feedbackData.result; // 'correct' or 'incorrect' for the result div's background
+
+    // Hide elements not relevant in feedback mode
+    if (document.getElementById('wiki-link')) {
+         document.getElementById('wiki-link').style.display = 'none';
+    }
+    document.getElementById('confidence-section').style.display = 'none';
+    submitButton.style.display = 'none';
+
+    // Update stats and chart
+    updateStats(feedbackData.new_stats, "feedbackDisplay");
+    fetchCalibrationData(); 
+
+    showQuestionUi(); // Ensure the main container for question text, options, and result is visible
+    
+    // Handle "Next Question" / "Play Again?" button state
+    if (feedbackData.end_of_game) {
+        let gameBrierForDisplay = "N/A";
+        if (feedbackData.new_stats.game_brier_scores && feedbackData.new_stats.game_brier_scores.length > 0) {
+            gameBrierForDisplay = (feedbackData.new_stats.game_brier_scores.reduce((a, b) => a + b, 0) / feedbackData.new_stats.game_brier_scores.length).toFixed(3);
+        }
+        resultElement.innerHTML += `<br><div class="game-over-message">Game Over! Final Score: ${feedbackData.new_stats.cumulative_score.toFixed(1)}. Avg Brier (This Game): ${gameBrierForDisplay}</div>`;
+        newQuestionButton.textContent = 'Play Again?';
+    } else {
+        newQuestionButton.textContent = 'Get Next Question';
+    }
+    newQuestionButton.disabled = false;
+    newQuestionButton.classList.remove('hidden');
+    preGameOptionsDiv.classList.add('hidden'); // Keep pre-game options hidden during feedback
+
+    hideLoading(); // Ensure loading spinner is hidden
+}
 
     function showLoading() { loadingElement.style.display = 'block'; clearError(); clearError(false); }
     function hideLoading() { loadingElement.style.display = 'none'; }
@@ -157,7 +479,7 @@
         else nicknameErrorElement.textContent = '';
     }
 
-    function handleNicknameSetup(needsSetup, suggestedNickname, currentConfirmedNickname) {
+    function handleNicknameSetup(needsSetup, suggestedNickname, currentConfirmedNicknameForSetup) {
         clearError(); clearError(false); 
         if (needsSetup) {
             nicknameSetupArea.classList.remove('hidden');
@@ -169,7 +491,7 @@
         } else {
             nicknameSetupArea.classList.add('hidden');
             gameArea.classList.remove('hidden'); 
-            userNicknameTextElement.textContent = currentConfirmedNickname || "Guest";
+            userNicknameTextElement.textContent = currentConfirmedNicknameForSetup || "Guest";
             if (!currentQuestionData) { 
                  preGameOptionsDiv.classList.remove('hidden');
                  newQuestionButton.classList.remove('hidden');
@@ -196,11 +518,7 @@
         .then(data => {
             hideLoading();
             if (data.status === 'success') {
-                userNicknameTextElement.textContent = data.nickname;
-                sessionStorage.removeItem('force_nickname_setup'); 
-                sessionStorage.removeItem('suggested_nickname_temp');
-                handleNicknameSetup(false, null, data.nickname); 
-                fetchStats(); 
+                window.location.reload(); 
             } else {
                 displayError(data.message || "Error setting nickname.", false);
             }
@@ -339,145 +657,844 @@
             });
     }
 
-    function submitAnswer() {
-        if (!selectedAnswer) return;
-        const confidence = parseInt(confidenceSlider.value, 10);
-        showLoading(); 
-        fetch('/submit_answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer: selectedAnswer, confidence: confidence }) })
-            .then(response => {
-                if (!response.ok) { return response.json().then(errData => { errData.status = response.status; throw errData; }).catch(() => { throw { message: `HTTP error ${response.status}`, status: response.status };});}
-                return response.json();
-            })
-            .then(resultData => {
-                hideLoading();
-                if (resultData.error && resultData.action_needed === "complete_nickname_setup") { handleBackendActionError(resultData, "submitting answer"); return;
-                } else if (resultData.error){ displayError(resultData.error); newQuestionButton.disabled = false; return; } 
-                
-                let feedbackText = `Result: ${resultData.result}. Correct Answer: ${resultData.correct_answer}) ${resultData.correct_answer_text}. Brier Score: ${resultData.brier_score.toFixed(3)}.`;
-                if (resultData.points_awarded !== undefined && resultData.points_awarded !== null) feedbackText += ` Points: ${resultData.points_awarded.toFixed(1)}`;
-                resultElement.textContent = feedbackText; resultElement.className = resultData.result;
-                const buttons = optionsElement.querySelectorAll('.option-button');
-                buttons.forEach(button => { 
-                    button.disabled = true; const btnLetter = button.dataset.answerLetter;
-                    if (btnLetter === resultData.correct_answer) button.classList.add('correct');
-                    else if (btnLetter === selectedAnswer) button.classList.add('incorrect');
-                    button.classList.remove('selected');
-                });
-                updateStats(resultData.new_stats, "submitAnswer"); fetchCalibrationData(); submitButton.disabled = true;
-                
-                if (resultData.end_of_game) {
-                    let gameBrierForDisplay = "N/A"; if (resultData.new_stats.game_brier_scores && resultData.new_stats.game_brier_scores.length > 0) gameBrierForDisplay = (resultData.new_stats.game_brier_scores.reduce((a,b)=>a+b,0) / resultData.new_stats.game_brier_scores.length).toFixed(3);
-                    resultElement.innerHTML += `<br><div class="game-over-message">Game Over! Final Score: ${resultData.new_stats.cumulative_score.toFixed(1)}. Avg Brier (This Game): ${gameBrierForDisplay}</div>`;
-                    newQuestionButton.textContent = 'Play Again?'; newQuestionButton.disabled = false; 
-                    document.getElementById('confidence-section').style.display = 'none'; submitButton.style.display = 'none';
-                    currentQuestionData = null; 
-                } else {
-                    newQuestionButton.textContent = 'Get Next Question'; newQuestionButton.disabled = false; 
-                }
-            })
-            .catch(error => { 
-                handleBackendActionError(error, "submitting answer");
-                if (error.action_needed !== "complete_nickname_setup") newQuestionButton.disabled = false;
+
+function submitAnswer() {
+    if (!selectedAnswer) {
+        // displayError("Please select an answer."); // Or some other UI feedback
+        return;
+    }
+    const confidence = parseInt(confidenceSlider.value, 10);
+
+    showLoading(); 
+    fetch('/submit_answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answer: selectedAnswer, confidence: confidence })
+    })
+    .then(response => {
+        if (!response.ok) {
+            // Try to parse error JSON from backend, then throw
+            return response.json().then(errData => { 
+                errData.status = response.status; // Add status to error object
+                throw errData; 
+            }).catch(() => { // If parsing error JSON fails, throw a generic error
+                throw { message: `HTTP error ${response.status}`, status: response.status };
             });
+        }
+        return response.json();
+    })
+    .then(feedbackData => { // Renamed from resultData for clarity with new flow
+        hideLoading();
+        // Check for specific action_needed from backend, e.g., nickname setup
+        if (feedbackData.error && feedbackData.action_needed === "complete_nickname_setup") {
+            handleBackendActionError(feedbackData, "submitting answer"); // Your existing error handler
+            return;
+        } else if (feedbackData.error){
+            displayError(feedbackData.error); // Your existing error display function
+            // Decide if newQuestionButton should be re-enabled or state reset
+            if (currentQuestionData) { // If there was an active question before error
+                 submitButton.disabled = false; // Re-enable submit if appropriate
+            }
+            return;
+        } 
+        
+        // Successfully got feedback data
+        // The backend now stores this in session['last_answer_feedback']
+        // and has cleared session['current_question'].
+        // We use the returned feedbackData to immediately update the UI.
+        displayAnswerFeedback(feedbackData); 
+    })
+    .catch(error => { 
+        hideLoading();
+        handleBackendActionError(error, "submitting answer"); // Your existing error handler
+        // Ensure UI is in a reasonable state after error, e.g., re-enable submit if appropriate
+        if (currentQuestionData && selectedAnswer) { // If there was an active question and an answer was selected
+            submitButton.disabled = false;
+        }
+    });
+}
+
+function startNewGame() { 
+    showLoading();
+    // Ensure last_answer_feedback is cleared from session on the server
+    return fetch('/clear_last_feedback', { method: 'POST' }) // Return the promise chain
+    .then(response => {
+        // Check response if needed, or assume it worked / backend start_new_game handles it too
+        return fetch('/start_new_game', { method: 'POST' }); 
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(errData => { 
+                errData.status = response.status; 
+                throw errData; 
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        hideLoading();
+        if (data.error && data.action_needed === "complete_nickname_setup") {
+            handleBackendActionError(data, "starting new game");
+            throw new Error("Nickname setup required by startNewGame"); 
+        } else if (data.status !== 'success') { 
+            displayError(data.message || "Could not start new game.");
+            if(newQuestionButton) newQuestionButton.disabled = false;
+            throw new Error(data.message || "Could not start new game"); 
+        }
+        
+        updateStats(data.new_stats, "startNewGame_js_success");
+        fetchCalibrationData(); 
+        currentQuestionData = null; 
+        lastAnswerFeedbackFromServer = null; // Clear this JS global too
+
+        console.log("New game successfully started (backend acknowledged). UI reset by showPreGameOptions or DOMContentLoaded on reload.");
+        // UI reset is now handled by showPreGameOptions called by the initiator,
+        // or if startNewGame causes a page reload (which it doesn't currently seem to),
+        // then DOMContentLoaded will handle UI setup.
+        // Explicitly call showPreGameOptions() here to ensure UI is in correct state
+        // if this function is called without an immediate page reload.
+        showPreGameOptions(); 
+        return data; // Resolve promise with data
+    })
+    .catch(error => { 
+        hideLoading();
+        if (error && error.action_needed !== "complete_nickname_setup") { 
+            handleBackendActionError(error, "starting new game");
+        }
+        if(newQuestionButton) newQuestionButton.disabled = false; 
+        console.error("Error in startNewGame promise chain:", error);
+        throw error; // Re-throw to allow further .catch if needed by caller
+    });
+}
+
+function updateStats(statsDataFromBackend, source = "unknown") { 
+    // statsDataFromBackend is the 'new_stats' object from /submit_answer or /start_new_game,
+    // or the full stats object from /get_stats (for guests on initial load).
+
+    console.log(`updateStats called FROM ${source} with data:`, JSON.stringify(statsDataFromBackend, null, 2));
+    if (!statsDataFromBackend) { 
+        console.error(`updateStats (from ${source}) called with null/undefined statsDataFromBackend.`); 
+        return; 
     }
 
-    function startNewGame() { 
-        showLoading();
-        fetch('/start_new_game', { method: 'POST' })
-            .then(response => {
-                if (!response.ok) { return response.json().then(errData => { errData.status = response.status; throw errData; }).catch(() => { throw { message: `HTTP error ${response.status}`, status: response.status };});}
-                return response.json();
-            })
-            .then(data => {
-                hideLoading();
-                 if (data.error && data.action_needed === "complete_nickname_setup") { handleBackendActionError(data, "starting new game"); return;
-                } else if (data.status !== 'success') { 
-                    displayError(data.message || "Could not start new game."); newQuestionButton.disabled = false; return;
-                }
-                updateStats(data.new_stats, "startNewGame_backend"); fetchCalibrationData(); currentQuestionData = null; 
-                handleNicknameSetup(false, null, userNicknameTextElement.textContent); 
-                prefabCategorySelect.value = 'random'; customCategoryInput.value = ''; hideQuestionUi(); resultElement.innerHTML = '';          
-            })
-            .catch(error => { 
-                handleBackendActionError(error, "starting new game");
-                if (error.action_needed !== "complete_nickname_setup") newQuestionButton.disabled = false;
-            });
+    // Helper to safely update textContent of an element if it exists
+    const setText = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.textContent = value;
+        } else {
+            // This log can be noisy if elements are intentionally absent for certain user types.
+            // console.warn(`updateStats: Element with ID '${id}' not found (this may be normal).`);
+        }
+    };
+
+    // --- Update elements common to both "Current Game" (for logged-in) and "Your Current Statistics" (for guests) ---
+    // These IDs are now used for the "Current Game" section for logged-in users,
+    // and also for the main stats for guests.
+    setText('stat-total-score', (statsDataFromBackend.cumulative_score !== undefined ? parseFloat(statsDataFromBackend.cumulative_score).toFixed(1) : '0'));
+    setText('stat-game-progress', statsDataFromBackend.questions_this_game !== undefined ? statsDataFromBackend.questions_this_game : '0');
+    
+    // game_length_setting might come from statsDataFromBackend (if from submit_answer/new_game) 
+    // or directly from a template variable for guests if using get_setting in Jinja.
+    // For simplicity, ensure it's in statsDataFromBackend if this function is to update it.
+    // The Python 'new_stats' from submit_answer/new_game already includes game_length_setting.
+    // For /get_stats (used by fetchStats for initial load), it also includes it.
+    setText('stat-game-length', statsDataFromBackend.game_length_setting !== undefined ? statsDataFromBackend.game_length_setting : 'N/A');
+
+
+    // --- Update elements specific to "Your Current Statistics" (for GUESTS) ---
+    // These elements will only exist in the DOM if the guest stats block was rendered.
+    // We can check for the existence of one of them.
+    if (document.getElementById('stat-answered')) { 
+        setText('stat-answered', statsDataFromBackend.total_answered !== undefined ? statsDataFromBackend.total_answered : '0');
+        setText('stat-correct', statsDataFromBackend.total_correct !== undefined ? statsDataFromBackend.total_correct : '0');
+        
+        const accuracy = (statsDataFromBackend.total_answered && statsDataFromBackend.total_answered > 0 && statsDataFromBackend.total_correct !== undefined) 
+                         ? ((statsDataFromBackend.total_correct / statsDataFromBackend.total_answered) * 100).toFixed(1) : 'N/A';
+        setText('stat-accuracy', accuracy);
+
+        const gameAvgBrier = (statsDataFromBackend.game_brier_scores && statsDataFromBackend.game_brier_scores.length > 0) 
+                            ? (statsDataFromBackend.game_brier_scores.reduce((a, b) => a + b, 0) / statsDataFromBackend.game_brier_scores.length).toFixed(3) : 'N/A';
+        setText('stat-game-avg-brier', gameAvgBrier);
+
+        const sessionAvgBrier = (statsDataFromBackend.brier_scores && statsDataFromBackend.brier_scores.length > 0) 
+                             ? (statsDataFromBackend.brier_scores.reduce((a, b) => a + b, 0) / statsDataFromBackend.brier_scores.length).toFixed(3) : 'N/A';
+        setText('stat-session-avg-brier', sessionAvgBrier);
+        
+        setText('stat-games-played', statsDataFromBackend.games_played_session !== undefined ? statsDataFromBackend.games_played_session : '0');
     }
 
-    function updateStats(stats, source = "unknown") { 
-        console.log(`updateStats called FROM ${source} with stats:`, JSON.stringify(stats, null, 2));
-        if (!stats) { console.error(`updateStats (from ${source}) called with null/undefined stats.`); return; }
-        statAnswered.textContent = stats.total_answered !== undefined ? stats.total_answered : '0';
-        statCorrect.textContent = stats.total_correct !== undefined ? stats.total_correct : '0';
-        const accuracy = (stats.total_answered && stats.total_answered > 0 && stats.total_correct !== undefined) ? ((stats.total_correct / stats.total_answered) * 100).toFixed(1) : 'N/A';
-        statAccuracy.textContent = accuracy;
-        const gameAvgBrier = (stats.game_brier_scores && stats.game_brier_scores.length > 0) ? (stats.game_brier_scores.reduce((a, b) => a + b, 0) / stats.game_brier_scores.length).toFixed(3) : 'N/A';
-        statGameAvgBrier.textContent = gameAvgBrier;
-        const sessionAvgBrier = (stats.brier_scores && stats.brier_scores.length > 0) ? (stats.brier_scores.reduce((a, b) => a + b, 0) / stats.brier_scores.length).toFixed(3) : 'N/A';
-        statSessionAvgBrier.textContent = sessionAvgBrier;
-        if (stats.hasOwnProperty('cumulative_score') && stats.cumulative_score !== null) { let score = parseFloat(stats.cumulative_score); if (!isNaN(score)) { statTotalScore.textContent = score.toFixed(1); } else { statTotalScore.textContent = 'Error'; }} else { statTotalScore.textContent = '0'; }
-        statGameProgress.textContent = stats.questions_this_game !== undefined ? stats.questions_this_game : '0';
-        statGameLength.textContent = stats.game_length_setting !== undefined ? stats.game_length_setting : 'N/A';
-        statGamesPlayed.textContent = stats.games_played_session !== undefined ? stats.games_played_session : '0';
-        const avgGameScore = (stats.completed_game_scores_session && stats.completed_game_scores_session.length > 0) ? (stats.completed_game_scores_session.reduce((a,b) => a + b, 0) / stats.completed_game_scores_session.length).toFixed(1) : 'N/A';
-        statAvgGameScore.textContent = avgGameScore;
+    // NOTE: The "Lifetime Statistics" (Overall and Category) for logged-in users are rendered
+    // server-side by Jinja and are NOT updated by this client-side 'updateStats' function
+    // after every question. They update on page load/refresh.
+    // If you wanted them to update dynamically, 'updateStats' would need to make an AJAX call
+    // to re-fetch lifetime stats, or the backend would need to send them with every submit_answer response.
+}
+function fetchStats() { fetch('/get_stats').then(r => r.json()).then(s => updateStats(s, "fetchStats_initial")).catch(e => console.error('Error fetching stats:', e)); }
+
+function fetchCalibrationData() {
+    let binsQueryParam = '';
+    // chartBinsSelect should also be defined in a scope accessible here,
+    // typically fetched once in DOMContentLoaded or globally if it always exists.
+    // Assuming chartBinsSelect is already defined and accessible.
+    if (chartBinsSelect && chartBinsSelect.value) {
+        binsQueryParam = `?bins=${chartBinsSelect.value}`;
     }
-    function fetchStats() { fetch('/get_stats').then(r => r.json()).then(s => updateStats(s, "fetchStats_initial")).catch(e => console.error('Error fetching stats:', e)); }
-    function fetchCalibrationData() { fetch('/get_calibration_data').then(r => r.json()).then(d => renderCalibrationChart(d)).catch(e => console.error('Error fetching calibration data:', e)); }
-    function renderCalibrationChart(data) { 
-        const points = data.points || []; const chartData = points.map(p => ({ x: p.x, y: p.y })); const counts = points.map(p => p.count); const maxCount = Math.max(1, ...counts); const minRadius = 3; const maxRadius = 15; const pointRadii = points.map(p => { if (p.count <= 0) return minRadius; let radius = minRadius + (maxRadius - minRadius) * Math.sqrt(p.count / maxCount); return Math.min(radius, maxRadius); }); const perfectLine = [{x: 0, y: 0}, {x: 100, y: 1.0}];
-        if (calibrationChart) { calibrationChart.data.datasets[0].data = chartData; calibrationChart.data.datasets[0].pointRadius = pointRadii; calibrationChart.update();
-        } else { calibrationChart = new Chart(calibrationChartCtx, { type: 'scatter', data: { datasets: [ { label: 'Calibration Bins', data: chartData, backgroundColor: 'rgba(0, 0, 255, 0.7)', borderColor: 'rgba(0, 0, 255, 1)', pointRadius: pointRadii, pointHoverRadius: pointRadii.map(r => r + 2), order: 2 }, { label: 'Perfect Calibration', data: perfectLine, type: 'line', borderColor: 'rgba(200, 200, 200, 0.8)', borderWidth: 2, pointRadius: 0, fill: false, tension: 0, order: 1 } ] }, options: { scales: { x: { type: 'linear', position: 'bottom', title: { display: true, text: 'Average Confidence in Bin (%)' }, min: 0, max: 100 }, y: { title: { display: true, text: 'Accuracy (Proportion Correct)' }, min: 0, max: 1.0 } }, plugins: { tooltip: { callbacks: { label: function(context) { if (context.datasetIndex === 0) { const pointIndex = context.dataIndex; const originalPoint = points[pointIndex]; if (!originalPoint) return "Data point error"; let label = ` Bin ${pointIndex + 1}: Avg Confidence: ${originalPoint.x.toFixed(1)}%, Accuracy: ${(originalPoint.y * 100).toFixed(1)}% (Count: ${originalPoint.count})`; return label; } else { return null; } } } }, legend: { display: true } }, responsive: true, maintainAspectRatio: true } }); }
+    console.log(`fetchCalibrationData called. Query: /get_calibration_data${binsQueryParam}`);
+
+    fetch(`/get_calibration_data${binsQueryParam}`)
+        .then(r => {
+            if (!r.ok) {
+                // Try to get more specific error from backend if possible
+                return r.json().then(err => { throw err; }).catch(() => {throw new Error(`HTTP error ${r.status}`)});
+            }
+            return r.json();
+        })
+        .then(data_from_server => { // Renamed 'd' for clarity
+            console.log("Calibration data received from server:", data_from_server);
+            
+            // CRUCIAL: Update the global 'points' array here
+            points = data_from_server.points || []; 
+            
+            renderCalibrationChart(data_from_server); // Pass the full data object
+        })
+        .catch(e => {
+            console.error('Error fetching/rendering calibration data:', e);
+            // Optionally, clear the chart or show an error message on the chart canvas
+            // if (calibrationChart) {
+            //     calibrationChart.clear(); 
+            //     // Or display a message on the canvas
+            // }
+        });
+}
+
+// Assuming chartBinsSelect is fetched in DOMContentLoaded or is global
+// const chartBinsSelect = document.getElementById('chart-bins-select'); // Should be defined before this
+if (chartBinsSelect) {
+    chartBinsSelect.addEventListener('change', function() {
+        console.log(`Chart bins changed to: ${this.value}. Refetching calibration data.`);
+        fetchCalibrationData(); // Re-fetch data when selection changes
+    });
+}
+
+function renderCalibrationChart(data_for_chart) { // Parameter is the object from fetch: { points: [...] }
+    // Use the points from the new data for chart rendering
+    const new_dataset_points = data_for_chart.points || []; 
+    
+    // Prepare data specifically for Chart.js: extract x, y for the scatter plot
+    const chartDataForScatter = new_dataset_points.map(p => ({ x: p.x, y: p.y }));
+    
+    // Calculate point radii based on the 'count' from the new_dataset_points
+    const counts = new_dataset_points.map(p => p.count);
+    const maxCount = Math.max(1, ...counts); // Avoid division by zero if all counts are 0
+    const minRadius = 3;
+    const maxRadius = 15;
+    const pointRadii = new_dataset_points.map(p => {
+        if (p.count <= 0) return minRadius;
+        // Scale radius by square root of count for better visual area representation
+        let radius = minRadius + (maxRadius - minRadius) * Math.sqrt(p.count / maxCount);
+        return Math.min(radius, maxRadius); // Cap radius at maxRadius
+    });
+
+    const perfectLine = [{x: 0, y: 0.0}, {x: 100, y: 1.0}]; // Perfect calibration line data
+
+    if (calibrationChart) { 
+        // If chart instance already exists, update its data
+        calibrationChart.data.datasets[0].data = chartDataForScatter; // Update scatter plot points
+        calibrationChart.data.datasets[0].pointRadius = pointRadii;   // Update radii
+        // You might want to update pointHoverRadius too if it's derived from pointRadii
+        calibrationChart.data.datasets[0].pointHoverRadius = pointRadii.map(r => Math.min(r + 2, maxRadius + 2));
+
+        calibrationChart.update(); // Tell Chart.js to re-render
+        console.log("Calibration chart updated with new data.");
+    } else { 
+        // If chart instance doesn't exist, create it
+        calibrationChart = new Chart(calibrationChartCtx, { // calibrationChartCtx must be your canvas context
+            type: 'scatter', 
+            data: { 
+                datasets: [ 
+                    { 
+                        label: 'Calibration Bins', 
+                        data: chartDataForScatter, // Use the x,y mapped data
+                        backgroundColor: 'rgba(0, 0, 255, 0.7)', 
+                        borderColor: 'rgba(0, 0, 255, 1)', 
+                        pointRadius: pointRadii, 
+                        pointHoverRadius: pointRadii.map(r => Math.min(r + 2, maxRadius + 2)), 
+                        order: 2 // Ensure scatter points are drawn on top of the line if overlapping
+                    }, 
+                    { 
+                        label: 'Perfect Calibration', 
+                        data: perfectLine, 
+                        type: 'line', // Render this dataset as a line
+                        borderColor: 'rgba(200, 200, 200, 0.8)', 
+                        borderWidth: 2, 
+                        pointRadius: 0, // No points on the line itself
+                        fill: false, 
+                        tension: 0, // Straight line
+                        order: 1 
+                    } 
+                ] 
+            }, 
+            options: { 
+                scales: { 
+                    x: { 
+                        type: 'linear', 
+                        position: 'bottom', 
+                        title: { display: true, text: 'Average Confidence in Bin (%)' }, 
+                        min: 0, 
+                        max: 100 
+                    }, 
+                    y: { 
+                        title: { display: true, text: 'Accuracy (Proportion Correct)' }, 
+                        min: 0, 
+                        max: 1.0 
+                    } 
+                }, 
+                plugins: { 
+                    tooltip: { 
+                        callbacks: {
+                            label: function(context) { // 'context' is the tooltip item
+                                if (context.datasetIndex === 0) { // Tooltip for 'Calibration Bins' dataset
+                                    const pointIndex = context.dataIndex; // Index of the point in the dataset
+                                    
+                                    // --- DEBUGGING LOGS ---
+                                    const chartJSDatasetPoint = context.chart.data.datasets[0].data[pointIndex];
+                                    // 'points' here refers to the GLOBAL 'points' array, which should have been
+                                    // updated in fetchCalibrationData before this function was called.
+                                    const originalPointFromGlobalArray = points[pointIndex]; 
+
+                                    console.log(`Tooltip hover: pointIndex [${pointIndex}]`);
+                                    console.log(`Global 'points' array length: ${points.length}`);
+                                    console.log(`Global points[${pointIndex}]:`, originalPointFromGlobalArray);
+                                    console.log(`Chart.js internal data point for this index (chartJSDatasetPoint):`, chartJSDatasetPoint);
+                                    // --- END DEBUGGING LOGS ---
+
+                                    if (!originalPointFromGlobalArray) {
+                                        // If our global 'points' array doesn't have corresponding full data.
+                                        if (chartJSDatasetPoint) {
+                                            // Fallback to display basic x,y from Chart.js internal data if available
+                                            return `Chart.js Point (Avg Conf: ${chartJSDatasetPoint.x.toFixed(1)}%, Acc: ${(chartJSDatasetPoint.y * 100).toFixed(1)}%) - Detailed info missing`;
+                                        }
+                                        return "Data point error (original data not found for tooltip)";
+                                    }
+                                    // Use originalPointFromGlobalArray which contains x, y, and count
+                                    let label = `Bin Data: Avg Confidence: ${originalPointFromGlobalArray.x.toFixed(1)}%, Accuracy: ${(originalPointFromGlobalArray.y * 100).toFixed(1)}% (Count: ${originalPointFromGlobalArray.count})`;
+                                    // The "Bin X:" part is harder to determine accurately here without knowing num_bins
+                                    // and the exact bin ranges. So, focusing on the data itself.
+                                    return label;
+                                } else { // Tooltip for other datasets (e.g., "Perfect Calibration" line)
+                                    return null; // Or use default Chart.js tooltip for these
+                                } 
+                            } 
+                        } 
+                    }, 
+                    legend: { 
+                        display: true 
+                    } 
+                }, 
+                responsive: true, 
+                maintainAspectRatio: true // Or false if you want to control size more directly via CSS
+            } 
+        });
+        console.log("Calibration chart created.");
     }
+}
 
     newQuestionButton.addEventListener('click', () => {
-        if (newQuestionButton.textContent === 'Play Again?') startNewGame(); 
-        else fetchNewQuestion(); 
+        // If button says "Begin Game" AND a game is already in progress, prompt.
+        if (newQuestionButton.textContent === 'Begin Game' && isGameInProgress()) {
+            if (!window.confirm("You have a game in progress. Starting a new game will abandon your current one and its score. Are you sure?")) {
+                return; // User cancelled
+            }
+            // User confirmed. We need to reset the current game and then fetch a new question
+            // based on the selections in preGameOptionsDiv.
+            startNewGame().then(() => { // startNewGame now returns a promise
+                console.log("New game started after confirmation, now fetching question with selected categories.");
+                fetchNewQuestion(); // fetchNewQuestion will use categories from UI
+            }).catch(err => console.error("Error starting new game after confirmation:", err));
+            return; // Stop further processing in this click handler
+        }
+
+        // Standard flow: Clear feedback if necessary, then proceed.
+        // The sessionStorage flags are to prevent multiple /clear_last_feedback calls
+        // if clicks are rapid or UI updates are chained.
+        if (lastAnswerFeedbackFromServer && sessionStorage.getItem('last_answer_feedback_cleared_by_click') !== 'true') {
+            fetch('/clear_last_feedback', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if(data.status === 'success') console.log("Last answer feedback cleared from session by newQuestionButton.");
+                    sessionStorage.setItem('last_answer_feedback_cleared_by_click', 'true');
+                    lastAnswerFeedbackFromServer = null; // Clear client-side state too
+                    proceedWithNewQuestionButtonAction();
+                })
+                .catch(err => {
+                    console.error("Error clearing feedback, proceeding anyway:", err);
+                    lastAnswerFeedbackFromServer = null; // Attempt to clear client-side state
+                    proceedWithNewQuestionButtonAction();
+                });
+        } else {
+            sessionStorage.removeItem('last_answer_feedback_cleared_by_click'); // Reset for next interaction
+            proceedWithNewQuestionButtonAction();
+        }
     });
+
     submitButton.addEventListener('click', submitAnswer);
     confidenceSlider.addEventListener('input', (e) => { confidenceValueElement.textContent = `${e.target.value}%`; });
-    
-    document.addEventListener('DOMContentLoaded', () => {
-        let userInfoOnLoad = null;
-        try { userInfoOnLoad = JSON.parse('{{ user_info | tojson | safe if user_info is not none else "null" }}'); } 
-        catch (e) { console.error("Error parsing user_info:", e, '{{ user_info | tojson | safe if user_info is not none else "null" }}');}
 
-        let activeQuestionDataFromServer = null;
-        try { activeQuestionDataFromServer = JSON.parse('{{ active_question_data | tojson | safe if active_question_data is not none else "null" }}'); } 
-        catch (e) { console.error("Error parsing active_question_data:", e, '{{ active_question_data | tojson | safe if active_question_data is not none else "null" }}');}
-        
-        let needsNicknameSetupOnLoad = ('{{ needs_nickname_setup | default(false) | tojson }}' === 'true');
-        
-        let suggestedNicknameOnLoad = null;
-        try { suggestedNicknameOnLoad = JSON.parse('{{ suggested_nickname | tojson | safe if suggested_nickname is not none else "null" }}'); } 
-        catch (e) { console.error("Error parsing suggested_nickname:", e, '{{ suggested_nickname | tojson | safe if suggested_nickname is not none else "null" }}');}
-
-        if (sessionStorage.getItem('force_nickname_setup') === 'true') {
-            needsNicknameSetupOnLoad = true;
-            const storedSuggestion = sessionStorage.getItem('suggested_nickname_temp');
-            if (storedSuggestion) suggestedNicknameOnLoad = storedSuggestion; 
-            sessionStorage.removeItem('force_nickname_setup');
-            sessionStorage.removeItem('suggested_nickname_temp');
+    function proceedWithNewQuestionButtonAction() {
+        // This function is called AFTER feedback is cleared (if any) by newQuestionButton handler
+        if (newQuestionButton.textContent === 'Play Again?') {
+            // 'Play Again?' implies end_of_game was true.
+            // startNewGame will reset server session for game, then UI.
+            startNewGame().then(() => {
+                showPreGameOptions(); // Ensure UI is in pre-game state after successful new game start
+                // Check if a category was pending from a "Play This Category" click that triggered Play Again
+                const pendingCatType = sessionStorage.getItem('pending_category_type');
+                const pendingCatValue = sessionStorage.getItem('pending_category_value');
+                if (pendingCatType && pendingCatValue) {
+                    sessionStorage.removeItem('pending_category_type');
+                    sessionStorage.removeItem('pending_category_value');
+                    console.log("Applying pending category after 'Play Again?' led to new game:", pendingCatType, pendingCatValue);
+                    setCategoryAndBegin(pendingCatType, pendingCatValue); // This will then click "Begin Game"
+                }
+            }).catch(err => console.error("Error in startNewGame from Play Again:", err));
+        } else { // "Begin Game" or "Get Next Question"
+            fetchNewQuestion(); // This will fetch based on current UI selections
         }
+    }
 
-        let currentConfirmedNickname = "Guest"; 
-        if (userInfoOnLoad && userInfoOnLoad.nickname) currentConfirmedNickname = userInfoOnLoad.nickname;
+// Wrapper for clarity when starting a new game AND immediately fetching a question
+function startNewGameAndFetch() {
+    // startNewGame() should reset UI to show pre-game options if successful.
+    // It also makes a call to /start_new_game which resets server session.
+    // After it completes, fetchNewQuestion() can be called.
+    // This might need a Promise or callback if startNewGame() is async and doesn't reload.
+    // Assuming startNewGame is synchronous in its UI reset or reloads the page:
+    
+    // If startNewGame reloads page, the new category from UI will be used.
+    // If startNewGame is AJAX and updates UI, then call fetchNewQuestion after its success.
+    
+    // Let's refine startNewGame to return a promise for better chaining.
+    // For now, a simple sequence (might have timing issues if startNewGame is slow AJAX w/o reload):
+    startNewGame(); // This should reset game state and UI to show pre-game options
+    setTimeout(() => { // Give a moment for UI reset from startNewGame if it's not instant
+        fetchNewQuestion(); // This will use the currently selected categories
+    }, 100); 
+}
+
+
+// Modified setCategoryAndBegin function
+function setCategoryAndBegin(catType, catValue) {
+    if (isGameInProgress()) {
+        if (!window.confirm("You have a game in progress. Starting a new game in this category will abandon your current one. Are you sure?")) {
+            return; // User cancelled
+        }
+        // If user confirms, we need to effectively call startNewGame() then set category and fetch.
+        // Store pending category in sessionStorage, call startNewGame.
+        // startNewGame might reload or just reset UI. DOMContentLoaded will pick up from sessionStorage.
+        sessionStorage.setItem('pending_category_type', catType);
+        sessionStorage.setItem('pending_category_value', catValue);
+        startNewGame(); // This should reset current game state & UI
+        // If startNewGame doesn't cause a reload, the DOMContentLoaded sessionStorage check will handle it.
+        // If it *does* reload, DOMContentLoaded will still pick up from sessionStorage.
+        return; 
+    }
+
+    // If no game in progress, proceed directly
+    window.scrollTo(0, 0); 
+    if (preGameOptionsDiv) preGameOptionsDiv.classList.remove('hidden');
+    if (newQuestionButton) newQuestionButton.classList.remove('hidden');
+    if (questionContainer && newQuestionButton && newQuestionButton.textContent === 'Begin Game') {
+        hideQuestionUi();
+    }
+
+    if (catType === 'user_category_custom') {
+        if (customCategoryInput) customCategoryInput.value = catValue;
+        if (prefabCategorySelect) prefabCategorySelect.value = 'random'; 
+    } else { 
+        if (prefabCategorySelect) prefabCategorySelect.value = catValue;
+        if (customCategoryInput) customCategoryInput.value = ''; 
+    }
+    
+    if (newQuestionButton) {
+        if (!currentQuestionData && !lastAnswerFeedbackFromServer) {
+            newQuestionButton.textContent = 'Begin Game';
+            newQuestionButton.disabled = false;
+        }
+        // A small delay can sometimes help ensure UI updates (like select value) are processed
+        // before the click action if there are many synchronous updates.
+        setTimeout(() => { newQuestionButton.click(); }, 50);
+    } else {
+        setTimeout(() => { fetchNewQuestion(); }, 50);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const queryCatType = urlParams.get('user_category_custom') ? 'user_category_custom' : urlParams.get('user_category_prefab') ? 'user_category_prefab' : null;
+    const queryCatValue = urlParams.get('user_category_custom') || urlParams.get('user_category_prefab');
+    const completeRegistrationPrompt = document.getElementById('complete-registration-prompt');
+    const defaultChartBinsFromServer = parseInt('{{ default_chart_bins | default(10) }}', 10);
+    const chartBinsSelect = document.getElementById('chart-bins-select');
+        if (queryCatType && queryCatValue && !sessionStorage.getItem('pending_category_type')) { 
+        // If query params are present and no sessionStorage pending (to avoid double processing)
+        console.log("Category from query params:", queryCatType, queryCatValue);
+        // Ensure pre-game UI is ready
+        if (preGameOptionsDiv.classList.contains('hidden') && !currentQuestionData && !lastAnswerFeedbackFromServer ) {
+             preGameOptionsDiv.classList.remove('hidden');
+             newQuestionButton.classList.remove('hidden');
+             newQuestionButton.textContent = 'Begin Game';
+             newQuestionButton.disabled = false;
+        }
+         // Clear these params from URL after processing if desired (using history.replaceState)
+        history.replaceState(null, '', window.location.pathname); 
         
-        handleNicknameSetup(needsNicknameSetupOnLoad, suggestedNicknameOnLoad, currentConfirmedNickname);
-        fetchUserCategories(); 
-            
-        if (!needsNicknameSetupOnLoad) {
-            if (activeQuestionDataFromServer && activeQuestionDataFromServer.question) { 
-                console.log("Active question data found, re-rendering:", activeQuestionDataFromServer);
-                currentQuestionData = activeQuestionDataFromServer; 
-                renderQuestion(activeQuestionDataFromServer); 
-            } else {
-                console.log("User set up, no active question. UI should be in pre-game state.");
+        // Small delay to ensure UI is ready
+        setTimeout(() => {
+            setCategoryAndBegin(queryCatType, queryCatValue);
+        }, 150);
+    } else {
+        // Check for pending category from sessionStorage (after startNewGame)
+        const pendingCatType = sessionStorage.getItem('pending_category_type');
+        const pendingCatValue = sessionStorage.getItem('pending_category_value');
+        if (pendingCatType && pendingCatValue) {
+            // ... (existing sessionStorage logic) ...
+        }
+    }
+
+     if (chartBinsSelect) {
+        // Set the dropdown's value to match the server-side default
+        // This ensures chartBinsSelect.value is correct before the first fetch
+        chartBinsSelect.value = defaultChartBinsFromServer.toString(); 
+
+        chartBinsSelect.addEventListener('change', function() {
+            // console.log(`Chart bins changed to: ${this.value}. Refetching calibration data.`); // Keep for debugging
+            fetchCalibrationData(); 
+        });
+    }
+    let userInfoOnLoad = null;
+    try { userInfoOnLoad = JSON.parse('{{ user_info | tojson | safe if user_info is not none else "null" }}'); } 
+    catch (e) { console.error("Error parsing user_info:", e); } // Simplified error logging
+
+    let activeQuestionDataFromServer = null;
+    try { activeQuestionDataFromServer = JSON.parse('{{ active_question_data | tojson | safe if active_question_data is not none else "null" }}'); } 
+    catch (e) { console.error("Error parsing active_question_data:", e); }
+    
+    let needsNicknameSetupOnLoad = ('{{ needs_nickname_setup | default(false) | tojson }}' === 'true');
+    
+    let suggestedNicknameOnLoad = null;
+    try { suggestedNicknameOnLoad = JSON.parse('{{ suggested_nickname | tojson | safe if suggested_nickname is not none else "null" }}'); } 
+    catch (e) { console.error("Error parsing suggested_nickname:", e); }
+
+    if (sessionStorage.getItem('force_nickname_setup') === 'true') {
+        needsNicknameSetupOnLoad = true;
+        const storedSuggestion = sessionStorage.getItem('suggested_nickname_temp');
+        if (storedSuggestion) suggestedNicknameOnLoad = storedSuggestion; 
+        sessionStorage.removeItem('force_nickname_setup');
+        sessionStorage.removeItem('suggested_nickname_temp');
+    }
+
+    // --- CORRECTED LOGIC ---
+    let currentConfirmedNicknameForSetup = "Guest"; // Initialize default
+
+    try { 
+        lastAnswerFeedbackFromServer = JSON.parse('{{ last_answer_feedback_data | tojson | safe if last_answer_feedback_data is not none else "null" }}');
+    } catch (e) { 
+        console.error("Error parsing last_answer_feedback_data:", e);
+        lastAnswerFeedbackFromServer = null;
+    }
+
+    if (userInfoOnLoad && typeof userInfoOnLoad === 'object') { // Check if userInfoOnLoad is a valid object
+        if (userInfoOnLoad.nickname) {
+            currentConfirmedNicknameForSetup = userInfoOnLoad.nickname;
+            // It's good practice to also update the main display element here if it exists
+            if (userNicknameTextElement) { // Assuming userNicknameTextElement is defined globally or fetched here
+                userNicknameTextElement.textContent = userInfoOnLoad.nickname;
             }
         }
-        fetchStats(); 
-        fetchCalibrationData(); 
+
+        // Now, handle the "complete registration" prompt, only if userInfoOnLoad is valid
+        if (completeRegistrationPrompt) { // Check if the prompt element exists
+            if (typeof userInfoOnLoad.user_id !== 'undefined' && 
+                userInfoOnLoad.user_id !== null && 
+                !userInfoOnLoad.email_registered) {
+                
+                // Use userInfoOnLoad.nickname here for consistency if available,
+                // otherwise currentConfirmedNicknameForSetup might be "Guest" if nickname was null
+                let promptNickname = userInfoOnLoad.nickname || "User"; 
+                completeRegistrationPrompt.innerHTML = `Welcome, <strong>${promptNickname}</strong>! <a href="{{ url_for('register') }}">Complete your registration</a> to save progress and access all features.`;
+                completeRegistrationPrompt.classList.remove('hidden');
+            } else {
+                completeRegistrationPrompt.classList.add('hidden');
+            }
+        }
+    } else if (completeRegistrationPrompt) { 
+        // If userInfoOnLoad is null (or not an object), ensure prompt is hidden
+        completeRegistrationPrompt.classList.add('hidden');
+    }
+    // --- END OF CORRECTED LOGIC ---
+    
+    // Pass the correctly determined nickname to handleNicknameSetup
+    handleNicknameSetup(needsNicknameSetupOnLoad, suggestedNicknameOnLoad, currentConfirmedNicknameForSetup);
+    
+    fetchUserCategories(); 
+        
+    if (lastAnswerFeedbackFromServer) {
+        console.log("DOMContentLoaded: Last answer feedback found, displaying feedback.");
+        displayAnswerFeedback(lastAnswerFeedbackFromServer);
+        if (!needsNicknameSetupOnLoad) gameArea.classList.remove('hidden');
+    } else if (!needsNicknameSetupOnLoad && activeQuestionDataFromServer && activeQuestionDataFromServer.question) { 
+        console.log("DOMContentLoaded: Active question data found, rendering question.");
+        currentQuestionData = activeQuestionDataFromServer; 
+        renderQuestion(activeQuestionDataFromServer); 
+        if (!needsNicknameSetupOnLoad) gameArea.classList.remove('hidden');
+    } else if (!needsNicknameSetupOnLoad) {
+        console.log("DOMContentLoaded: User set up, no active Q/feedback. Showing pre-game options.");
+        showPreGameOptions();
+        if (!needsNicknameSetupOnLoad) gameArea.classList.remove('hidden');
+    }
+    // If needsNicknameSetupOnLoad is true, handleNicknameSetup (called earlier) manages UI.
+
+
+    // Check for pending category from query params (if redirected from leaderboard)
+    // OR from sessionStorage (if set by setCategoryAndBegin -> startNewGame)
+    let autoStartCatType = null;
+    let autoStartCatValue = null;
+    let clearUrlParams = false;
+
+    if (urlParams.has('user_category_custom')) {
+        autoStartCatType = 'user_category_custom';
+        autoStartCatValue = urlParams.get('user_category_custom');
+        clearUrlParams = true;
+    } else if (urlParams.has('user_category_prefab')) {
+        autoStartCatType = 'user_category_prefab';
+        autoStartCatValue = urlParams.get('user_category_prefab');
+        clearUrlParams = true;
+    } else { // No query params, check sessionStorage
+        autoStartCatType = sessionStorage.getItem('pending_category_type');
+        autoStartCatValue = sessionStorage.getItem('pending_category_value');
+    }
+
+    if (autoStartCatType && autoStartCatValue) {
+        console.log("DOMContentLoaded: Found pending category to auto-start:", autoStartCatType, autoStartCatValue);
+        if (sessionStorage.getItem('pending_category_type')) { // Clear if from session storage
+            sessionStorage.removeItem('pending_category_type');
+            sessionStorage.removeItem('pending_category_value');
+        }
+        if (clearUrlParams && window.history.replaceState) {
+            const cleanURL = window.location.protocol + "//" + window.location.host + window.location.pathname;
+            window.history.replaceState({path: cleanURL}, '', cleanURL);
+        }
+        
+        // Call setCategoryAndBegin. It will handle 'isGameInProgress' check itself.
+        // Small delay to ensure all other DOMContentLoaded UI setup (like handleNicknameSetup) has completed.
+        setTimeout(() => {
+            console.log("DOMContentLoaded: Calling setCategoryAndBegin for pending/query param category.");
+            setCategoryAndBegin(autoStartCatType, autoStartCatValue);
+        }, 250); // Increased delay slightly
+    }
+
+    fetchStats(); 
+    fetchCalibrationData(); 
+
+        const categoryTable = document.getElementById('categoryStatsTable');
+    if (categoryTable) {
+        const headers = categoryTable.querySelectorAll('thead th[data-sort-by]');
+        let currentSort = { column: 'average_brier', order: 'asc' }; // Default sort
+
+        function sortTable(columnIndex, dataType, sortKey) {
+            const tbody = categoryTable.querySelector('tbody');
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            
+            const sortOrder = (currentSort.column === sortKey && currentSort.order === 'asc') ? 'desc' : 'asc';
+
+            rows.sort((a, b) => {
+                let valA = a.cells[columnIndex].textContent.trim();
+                let valB = b.cells[columnIndex].textContent.trim();
+
+                if (dataType === 'numeric') {
+                    // Handle "N/A" by treating them as very large (for asc) or very small (for desc)
+                    // or by pushing them to the bottom. For Brier (lower is better), N/A could be high.
+                    const naValue = sortOrder === 'asc' ? Infinity : -Infinity;
+                    valA = (valA === 'N/A' || valA === '') ? naValue : parseFloat(valA.replace('%', ''));
+                    valB = (valB === 'N/A' || valB === '') ? naValue : parseFloat(valB.replace('%', ''));
+                } else { // alpha
+                    valA = valA.toLowerCase();
+                    valB = valB.toLowerCase();
+                }
+
+                if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+                if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+                return 0;
+            });
+
+            rows.forEach(row => tbody.appendChild(row)); // Re-append sorted rows
+
+            // Update header arrows and current sort state
+            headers.forEach(th => {
+                th.classList.remove('current-sort-asc', 'current-sort-desc');
+                const arrowSpan = th.querySelector('.sort-arrow');
+                if (arrowSpan) arrowSpan.textContent = '';
+            });
+
+            const activeHeader = headers[columnIndex];
+            activeHeader.classList.add(sortOrder === 'asc' ? 'current-sort-asc' : 'current-sort-desc');
+            const arrowSpan = activeHeader.querySelector('.sort-arrow');
+            if(arrowSpan) arrowSpan.textContent = sortOrder === 'asc' ? '▲' : '▼';
+            
+            currentSort = { column: sortKey, order: sortOrder };
+        }
+
+        headers.forEach((header, index) => {
+            header.addEventListener('click', () => {
+                const sortKey = header.dataset.sortBy;
+                const dataType = header.dataset.sortType;
+                sortTable(index, dataType, sortKey);
+            });
+            // Add initial arrow to default sort column
+            if (header.dataset.sortBy === currentSort.column) {
+                const arrowSpan = header.querySelector('.sort-arrow');
+                 if(arrowSpan) arrowSpan.textContent = currentSort.order === 'asc' ? '▲' : '▼';
+            }
+        });
+
+        // Initial sort (default: Brier ascending)
+        let defaultSortHeader = Array.from(headers).find(h => h.dataset.sortBy === 'average_brier');
+        if (defaultSortHeader) {
+             sortTable(Array.from(defaultSortHeader.parentNode.children).indexOf(defaultSortHeader), 'numeric', 'average_brier');
+             // Since sortTable toggles, and we want asc first, call it again if it defaulted to desc
+             if (currentSort.column === 'average_brier' && currentSort.order === 'desc') {
+                sortTable(Array.from(defaultSortHeader.parentNode.children).indexOf(defaultSortHeader), 'numeric', 'average_brier');
+             }
+        }
+    }
+    document.body.addEventListener('click', function(event) {
+        if (event.target.classList.contains('play-category-button')) {
+            const button = event.target;
+            const catType = button.dataset.categoryType;
+            const catValue = button.dataset.categoryValue;
+
+            console.log(`Play category clicked: Type=${catType}, Value=${catValue}`);
+
+            // Ensure we are on the index page or handle redirection
+            if (window.location.pathname !== '/') {
+                // If on another page (like /leaderboard), redirect to index with params
+                const params = new URLSearchParams();
+                params.set(catType, catValue);
+                window.location.href = `{{ url_for('index') }}?${params.toString()}`;
+                return;
+            }
+
+            // If already on index page:
+            // 1. Clear any existing game state (if mid-game, prompt - this is part 2 of Feature #7)
+            //    For now, let's assume we just start a new game setup.
+            //    If currentQuestionData or lastAnswerFeedbackFromServer exist, we should call startNewGame()
+            if (currentQuestionData || lastAnswerFeedbackFromServer) {
+                // Call startNewGame, which should reset state and then allow new selection
+                // startNewGame also calls /clear_last_feedback
+                console.log("Existing game/feedback state found. Calling startNewGame first.");
+                startNewGame(); // This function will eventually show pre-game options
+                // We need to set the category *after* startNewGame has reset the UI
+                // This can be tricky due to async nature.
+                // A simple way is to store desired category in sessionStorage and pick it up after startNewGame's UI reset.
+                sessionStorage.setItem('pending_category_type', catType);
+                sessionStorage.setItem('pending_category_value', catValue);
+                // The startNewGame success callback or DOMContentLoaded after reload (if startNewGame reloads)
+                // would need to check sessionStorage.
+                // OR, more simply, if startNewGame just resets UI and doesn't reload:
+                // We can defer setting the category and clicking "Begin Game"
+                setTimeout(() => {
+                    setCategoryAndBegin(catType, catValue);
+                }, 100); // Small delay to allow startNewGame UI reset
+                return; // Stop further execution here
+            }
+            
+            // If no current game, directly set category and begin
+            setCategoryAndBegin(catType, catValue);
+        }
     });
+
+    // Check for pending category from redirection or after startNewGame
+    const pendingCatType = sessionStorage.getItem('pending_category_type');
+    const pendingCatValue = sessionStorage.getItem('pending_category_value');
+    if (pendingCatType && pendingCatValue) {
+        sessionStorage.removeItem('pending_category_type');
+        sessionStorage.removeItem('pending_category_value');
+        // Ensure pre-game options are visible before setting and clicking
+        if (preGameOptionsDiv.classList.contains('hidden') && !currentQuestionData && !lastAnswerFeedbackFromServer) {
+             preGameOptionsDiv.classList.remove('hidden');
+             newQuestionButton.classList.remove('hidden');
+             newQuestionButton.textContent = 'Begin Game';
+             newQuestionButton.disabled = false;
+        }
+        // Small delay to ensure UI is ready from any previous operations
+        setTimeout(() => {
+            setCategoryAndBegin(pendingCatType, pendingCatValue);
+        }, 150);
+    }
+});
+
+    function setCategoryAndBegin(catType, catValue) {
+        console.log("setCategoryAndBegin called with:", catType, catValue, "isGameInProgress:", isGameInProgress());
+        if (isGameInProgress()) {
+            if (!window.confirm("You have a game in progress. Starting a new game in this category will abandon your current one and its score. Are you sure?")) {
+                return; // User cancelled
+            }
+            // User confirmed. Store pending category and start a new game.
+            // startNewGame() will reset server and client state.
+            // After startNewGame() completes, it should result in the pre-game UI.
+            // The DOMContentLoaded (if page reloads) or logic after startNewGame().then()
+            // needs to pick up the pending category.
+            sessionStorage.setItem('pending_category_type', catType);
+            sessionStorage.setItem('pending_category_value', catValue);
+            
+            startNewGame().then(() => {
+                // startNewGame has reset things and UI should be pre-game.
+                // Now, apply the pending category.
+                const pCatType = sessionStorage.getItem('pending_category_type');
+                const pCatValue = sessionStorage.getItem('pending_category_value');
+                if (pCatType && pCatValue) {
+                    sessionStorage.removeItem('pending_category_type');
+                    sessionStorage.removeItem('pending_category_value');
+                    console.log("Applying pending category after confirmed new game start:", pCatType, pCatValue);
+                    // Call setCategoryAndBegin again, but this time isGameInProgress will be false.
+                    // This recursive call needs to be safe.
+                    setCategoryAndBegin(pCatType, pCatValue); 
+                } else {
+                    // Should not happen if sessionStorage was set, but as fallback:
+                    showPreGameOptions();
+                }
+            }).catch(err => {
+                console.error("Error during startNewGame in setCategoryAndBegin:", err);
+                showPreGameOptions(); // Show pre-game options on error
+            });
+            return; 
+        }
+
+        // No game in progress, or user confirmed abandoning old one.
+        window.scrollTo(0, 0); 
+        showPreGameOptions(); // Ensure pre-game options and "Begin Game" button are visible and correctly set.
+        
+        if (catType === 'user_category_custom') {
+            if (customCategoryInput) customCategoryInput.value = catValue;
+            if (prefabCategorySelect) prefabCategorySelect.value = 'random'; 
+        } else { // user_category_prefab
+            if (prefabCategorySelect) prefabCategorySelect.value = catValue;
+            if (customCategoryInput) customCategoryInput.value = ''; 
+        }
+        
+        console.log("Category set in UI, attempting to click 'Begin Game' button.");
+        if (newQuestionButton && newQuestionButton.textContent === 'Begin Game') {
+            // Small delay can help ensure UI updates from setting select value are processed.
+            setTimeout(() => { newQuestionButton.click(); }, 50);
+        } else {
+            console.warn("'Begin Game' button not found or text is not 'Begin Game'. Current text:", newQuestionButton ? newQuestionButton.textContent : "Button not found");
+            // Fallback or error handling if button state is unexpected
+            // Potentially directly call fetchNewQuestion after a small delay if button state is complex to manage here.
+            setTimeout(() => { fetchNewQuestion(); }, 100);
+        }
+    }
+
+
 </script>
-</body>
-</html>
+{% endblock %}

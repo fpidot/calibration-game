@@ -9,7 +9,7 @@ from wtforms.fields import SelectField, TextAreaField, StringField, HiddenField
 from wtforms.validators import DataRequired, Optional
 
 # Import your models
-from models import AppSetting, Response, User
+from models import AppSetting, Response, User, UserFeedback
 
 
 
@@ -156,3 +156,70 @@ class UserAdminView(ModelView):
     def is_accessible(self): return True # Add your access control
     def inaccessible_callback(self, name, **kwargs):
         flash('You are not authorized...', 'warning'); return redirect(url_for('index'))
+    
+class UserFeedbackAdminView(ModelView):
+    # Which columns to display in the list view
+    column_list = ('submitted_at', 'user', 'nickname_at_submission', 'email_address_at_submission', 
+                   'feedback_type', 'message', 'is_resolved', 'page_context')
+    
+    # Which columns can be searched
+    column_searchable_list = ('nickname_at_submission', 'email_address_at_submission', 'message', 
+                              'feedback_type', 'page_context', 'user.nickname', 'user.email')
+    
+    # Which columns can be filtered
+    column_filters = ('feedback_type', 'submitted_at', 'is_resolved', 'user.nickname')
+    
+    # Default sort
+    column_default_sort = ('submitted_at', True) # True for descending (newest first)
+
+    # Make message display a bit better in list (optional, can be slow with lots of text)
+    # column_formatters = {
+    #    'message': lambda v, c, m, p: (m.message[:100] + '...') if m.message and len(m.message) > 100 else m.message
+    # }
+
+    # Control which fields are editable in the form view
+    # For now, let's allow editing of resolution status and admin notes
+    form_columns = ('user', 'nickname_at_submission', 'email_address_at_submission', 
+                    'feedback_type', 'message', 'page_context', 'user_agent_string',
+                    'is_resolved', 'admin_notes') # 'submitted_at' is auto
+
+    # Make some fields read-only in the edit form if they shouldn't be changed by admin
+    form_edit_rules = (
+        'user', 'nickname_at_submission', 'email_address_at_submission', 
+        'feedback_type', 'message', 'page_context', 'user_agent_string',
+        'submitted_at', # Should be read-only
+        'is_resolved', 
+        'admin_notes'
+    )
+    # Or, more simply, define which fields CANNOT be edited:
+    # form_excluded_columns_on_edit = ['submitted_at', 'user_id', 'user_agent_string', 'page_context']
+    # form_widget_args to make some fields readonly
+    form_widget_args = {
+        'submitted_at': {'readonly': True},
+        'user': {'readonly': True}, # Don't change the linked user
+        'nickname_at_submission': {'readonly': True},
+        'email_address_at_submission': {'readonly': True},
+        'feedback_type': {'readonly': True}, # Usually don't change this after submission
+        'message': {'readonly': True},       # Don't change the user's message
+        'user_agent_string': {'readonly': True},
+        'page_context': {'readonly': True},
+    }
+
+
+    # Can admin create new feedback entries? Probably not.
+    can_create = False
+    # Can admin delete feedback? Your choice.
+    can_delete = True # Or False
+    # Can admin edit? Yes, for is_resolved and admin_notes.
+    can_edit = True
+
+    page_size = 50 # Number of items per page
+
+    def is_accessible(self):
+        # Add your access control logic here, e.g., check if current_user is admin
+        # For now, let's assume basic access or you'll add your real check
+        return True # Replace with your actual admin check
+
+    def inaccessible_callback(self, name, **kwargs):
+        flash('You are not authorized to access this page.', 'warning')
+        return redirect(url_for('index')) # Or your login page

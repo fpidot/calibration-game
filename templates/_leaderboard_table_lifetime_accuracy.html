@@ -1,0 +1,22 @@
+<table class="leaderboard-table">
+<thead>
+<tr>
+<th>Rank</th>
+<th>Nickname</th>
+<th>Lifetime Accuracy</th>
+<th>Total Questions Answered</th>
+</tr>
+</thead>
+<tbody>
+{% for row in top_lifetime_accuracy %}
+<tr>
+<td>{{ loop.index }}</td>
+<td>{{ row.nickname }}</td>
+<td>{{ "%.1f"|format(row.accuracy_val) }}%</td>
+<td>{{ row.total_questions_answered }}</td>
+</tr>
+{% else %}
+<tr><td colspan="4" style="text-align:center;">Not enough data yet (or no users meet minimum question criteria).</td></tr>
+{% endfor %}
+</tbody>
+</table>
