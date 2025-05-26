@@ -1151,16 +1151,28 @@ function setCategoryValuesInUI(catType, catValue) {
 document.addEventListener('DOMContentLoaded', () => {
     console.log("DOMContentLoaded: Fired");
 
-    // --- 1. Initialize DOM Element References (if not already global) ---
-    // Assuming these are defined globally or at the top of your <script> tag:
-    // const userNicknameTextElement = document.getElementById('user-nickname-text');
-    // const completeRegistrationPrompt = document.getElementById('complete-registration-prompt');
-    // const preGameOptionsDiv = document.getElementById('pre-game-options');
-    // const newQuestionButton = document.getElementById('new-question-button');
-    // const gameArea = document.getElementById('game-area');
-    // const chartBinsSelect = document.getElementById('chart-bins-select');
-    // const categoryStatsTable = document.getElementById('categoryStatsTable'); // For sortable table
-    // ... and any others needed by helper functions like handleNicknameSetup, renderQuestion, etc.
+    // --- 1. Initialize DOM Element References ---
+    // Define ALL consts for DOM elements used by any function called from within DOMContentLoaded here.
+    const userNicknameTextElement = document.getElementById('user-nickname-text');
+    const completeRegistrationPrompt = document.getElementById('complete-registration-prompt');
+    const preGameOptionsDiv = document.getElementById('pre-game-options');
+    const newQuestionButton = document.getElementById('new-question-button');
+    const gameArea = document.getElementById('game-area');
+    const questionContainer = document.getElementById('question-container'); // Used by showPreGameOptions, setCategoryAndBegin
+    const nicknameSetupArea = document.getElementById('nickname-setup-area');
+    const customCategoryInput = document.getElementById('custom-category-input'); // Used by setCategoryValuesInUI
+    const prefabCategorySelect = document.getElementById('prefab-category-select'); // Used by setCategoryValuesInUI
+    const chartBinsSelect = document.getElementById('chart-bins-select');
+    const categoryStatsTable = document.getElementById('categoryStatsTable'); // For sortable table
+    const optionsElement = document.getElementById('options-container').querySelector('ul'); // Used by displayAnswerFeedback etc.
+    const resultElement = document.getElementById('result'); // Used by displayAnswerFeedback etc.
+    const questionTextElement = document.getElementById('question-text'); // Used by renderQuestion etc.
+    const submitButton = document.getElementById('submit-answer-button'); // Used by displayAnswerFeedback etc.
+    const loadingElement = document.getElementById('loading'); // Used by show/hideLoading
+    const errorMessageElement = document.getElementById('error-message'); // Used by displayError
+    const nicknameInputElement = document.getElementById('nickname-input'); // Used by handleNicknameSetup
+    const nicknameErrorElement = document.getElementById('nickname-error'); // Used by displayError
+    // const displayedCategoryElement = document.getElementById('displayed-category'); // Add if you still use this directly
 
     // --- 2. Parse Initial State from Server-Rendered Template ---
     let userInfoOnLoad = null;
@@ -1182,8 +1194,8 @@ document.addEventListener('DOMContentLoaded', () => {
     catch (e) { console.error("Error parsing suggested_nickname:", e); }
 
     // Update global JS state variables
-    currentQuestionData = activeQuestionDataFromServer; // Initialize global
-    lastAnswerFeedbackFromServer = lastAnswerFeedbackDataFromTemplate; // Initialize global
+    currentQuestionData = activeQuestionDataFromServer; 
+    lastAnswerFeedbackFromServer = lastAnswerFeedbackDataFromTemplate; 
 
     if (sessionStorage.getItem('force_nickname_setup') === 'true') {
         needsNicknameSetupOnLoad = true;
@@ -1200,7 +1212,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentConfirmedNicknameForDisplay = userInfoOnLoad.nickname;
         if (userNicknameTextElement) userNicknameTextElement.textContent = currentConfirmedNicknameForDisplay;
 
-        if (completeRegistrationPrompt) {
+        if (completeRegistrationPrompt) { 
             if (userInfoOnLoad.user_id && !userInfoOnLoad.email_registered) {
                 let promptNickname = userInfoOnLoad.nickname || "User"; 
                 completeRegistrationPrompt.innerHTML = `Welcome, <strong>${promptNickname}</strong>! <a href="{{ url_for('register') }}">Complete your registration</a>...`;
@@ -1214,16 +1226,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // --- 4. Nickname Setup UI ---
-    handleNicknameSetup(needsNicknameSetupOnLoad, suggestedNicknameOnLoad, currentConfirmedNicknameForDisplay);
+    if (typeof handleNicknameSetup === "function") {
+         handleNicknameSetup(needsNicknameSetupOnLoad, suggestedNicknameOnLoad, currentConfirmedNicknameForDisplay);
+    }
     
     // --- 5. Fetch Dynamic Categories ---
-    fetchUserCategories(); 
+    if (typeof fetchUserCategories === "function") fetchUserCategories(); 
     
     // --- 6. Determine Auto-Start Category (from URL first, then sessionStorage) ---
     const urlParams = new URLSearchParams(window.location.search);
     let autoStartCatType = null;
     let autoStartCatValue = null;
-    let sourceOfAutoStart = null; // For logging
+    let sourceOfAutoStart = null; 
 
     if (urlParams.has('user_category_custom')) {
         autoStartCatType = 'user_category_custom';
@@ -1242,69 +1256,77 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- 7. Initial Game Area UI Setup OR Auto-Start Game ---
-    // This section decides what to show initially if no auto-start,
-    // or prepares for auto-start by calling setCategoryAndBegin.
-
-    if (autoStartCatType && autoStartCatValue) { // If an auto-start category is determined
+    let gameAutoStarted = false;
+    if (autoStartCatType && autoStartCatValue) {
         console.log(`DOMContentLoaded: Auto-starting category from ${sourceOfAutoStart} - Type: ${autoStartCatType}, Value: ${autoStartCatValue}`);
-        
-        if (sourceOfAutoStart === 'sessionStorage') { // Clear sessionStorage if it was the source
+        gameAutoStarted = true; // Flag that we are attempting an auto-start
+
+        if (sourceOfAutoStart === 'sessionStorage') { 
             sessionStorage.removeItem('pending_category_type');
             sessionStorage.removeItem('pending_category_value');
         }
-        if (sourceOfAutoStart === 'URL' && window.history.replaceState) { // Clear URL params if they were the source
+        if (sourceOfAutoStart === 'URL' && window.history.replaceState) { 
             const cleanURL = window.location.protocol + "//" + window.location.host + window.location.pathname;
             window.history.replaceState({path: cleanURL}, '', cleanURL);
         }
         
-        // Delay slightly to ensure handleNicknameSetup (if run) has finished UI changes
         setTimeout(() => {
             console.log("DOMContentLoaded: Calling setCategoryAndBegin for auto-start.");
-            setCategoryAndBegin(autoStartCatType, autoStartCatValue);
-        }, 100); // Reduced delay a bit, adjust if needed
-    } else {
-        // NO auto-start category. Set up UI based on current state (feedback, active Q, or pre-game).
+            if (typeof setCategoryAndBegin === "function") setCategoryAndBegin(autoStartCatType, autoStartCatValue);
+        }, 100);
+    }
+    
+    if (!gameAutoStarted) { // Only run this if a game wasn't auto-started
         if (needsNicknameSetupOnLoad) {
             if(gameArea) gameArea.classList.add('hidden'); 
         } else if (lastAnswerFeedbackFromServer) {
             console.log("DOMContentLoaded: No auto-start. Displaying initial feedback.");
-            displayAnswerFeedback(lastAnswerFeedbackFromServer);
+            if (typeof displayAnswerFeedback === "function") displayAnswerFeedback(lastAnswerFeedbackFromServer);
             if(gameArea) gameArea.classList.remove('hidden');
         } else if (currentQuestionData) { 
             console.log("DOMContentLoaded: No auto-start. Displaying initial active question.");
-            renderQuestion(currentQuestionData);
+            if (typeof renderQuestion === "function") renderQuestion(currentQuestionData);
             if(gameArea) gameArea.classList.remove('hidden');
         } else if (!needsNicknameSetupOnLoad) { 
             console.log("DOMContentLoaded: No auto-start. Showing pre-game options.");
-            showPreGameOptions();
+            if (typeof showPreGameOptions === "function") showPreGameOptions();
             if(gameArea) gameArea.classList.remove('hidden');
         }
     }
 
     // --- 8. Chart Bin Controls & Initial Data Fetches ---
     const defaultChartBinsFromServer = parseInt('{{ default_chart_bins | default(10) }}', 10);
-    // const chartBinsSelect = document.getElementById('chart-bins-select'); // Assumed defined globally or top of script
-
-    if (chartBinsSelect) {
+    if (chartBinsSelect) { // chartBinsSelect is now defined at the top of DOMContentLoaded
         chartBinsSelect.value = defaultChartBinsFromServer.toString();
-        chartBinsSelect.addEventListener('change', fetchCalibrationData); // Simplified listener
+        chartBinsSelect.addEventListener('change', fetchCalibrationData); 
     }
     
-    fetchStats(); 
-    fetchCalibrationData(); 
+    if (typeof fetchStats === "function") fetchStats(); 
+    if (typeof fetchCalibrationData === "function") fetchCalibrationData(); 
 
-    // --- 9. Initialize Table Sorter (Your existing sortable table JS) ---
-    // const categoryTable = document.getElementById('categoryStatsTable');
-    if (categoryStatsTable) { // Make sure categoryStatsTable is defined
-        // ... (your full table sorting logic from the previous working version) ...
-        // Ensure 'headers', 'currentSort', 'sortTable' are defined within this if block
-        // or in a scope accessible if they are helper functions.
+    // --- 9. Initialize Table Sorter ---
+    if (categoryStatsTable) { 
+        // ... (your full table sorting logic here) ...
     }
 
-    // --- 10. Event Delegation for "Play This Category" (Your existing listener) ---
-    // This should be attached to a static parent if the table is dynamic, or directly if table always exists.
-    // document.body.addEventListener('click', function(event) { ... }); // This is generally fine.
-    // Your existing event listener for 'play-category-button' should be here.
+    // --- 10. Event Delegation for "Play This Category" buttons ON THIS PAGE ---
+    document.body.addEventListener('click', function(event) {
+        const button = event.target.closest('.play-category-button'); 
+        if (button) {
+            event.preventDefault(); 
+            const catType = button.dataset.categoryType;
+            const catValue = button.dataset.categoryValue;
+
+            if (catType && catValue) {
+                console.log(`Direct click on 'play-category-button' on index.html: Type=${catType}, Value=${catValue}`);
+                if (typeof setCategoryAndBegin === "function") {
+                    setCategoryAndBegin(catType, catValue);
+                }
+            } else {
+                console.warn("Play category button clicked but missing data attributes:", button);
+            }
+        }
+    });
 
     console.log("DOMContentLoaded: All setup complete.");
 });

@@ -1,0 +1,122 @@
+Project Memo: Wikipedia Calibration Game
+Date: May 26, 2025
+Project: Wikipedia Calibration Game
+Goal: Develop an engaging web application where users answer trivia questions generated from Wikipedia articles, provide a confidence rating for their answers, and are scored based on correctness and calibration (Brier score). The application features user accounts, persistent statistics, leaderboards, and an admin interface.
+1. Key Technologies:
+Backend: Flask (Python)
+Database: PostgreSQL (with SQLAlchemy ORM & Flask-Migrate)
+Frontend: HTML, CSS, JavaScript (including Chart.js for calibration visuals)
+User Authentication: Flask-Login
+Forms: Flask-WTF
+Admin Interface: Flask-Admin
+Styling (Basic): Flask-Bootstrap (primarily for Admin, some basic form styling elements used/available)
+AI for Q&A: Google Gemini API (for question generation and topic standardization)
+Environment: Python virtual environment, .env for secrets.
+2. Current Project Status (Summary):
+The project has reached a significant stage of development with core gameplay, robust user management, detailed statistics display, functional leaderboards, and a user feedback mechanism in place. Recent efforts focused on refining user experience around game state transitions, stats display consistency, and bug fixes related to JavaScript interactions and data handling.
+Implemented Features:
+A. Core Game Loop:
+Dynamic question generation from Wikipedia articles using the Gemini API.
+User answer and 0-100% confidence input.
+Scoring: Brier score per question, gamified points system (configurable via Admin).
+Response model for storing detailed answer data.
+GameSummary model for storing per-game summaries for registered users upon game completion (score, average Brier, category, questions answered).
+Configurable game length.
+Persistent answer feedback screen (survives page refresh until next action).
+B. User Management (Flask-Login Integrated):
+Initial Nickname Setup: New users are guided through choosing a unique nickname (/set_nickname).
+Full Registration: Users can register their nickname with an email and password (/register, RegistrationForm). Handles "claiming" an existing nickname-only account.
+Login/Logout: Secure login (/login, LoginForm) and logout (/logout). current_user is used for session management. last_login_at is updated.
+"Remember Me" Functionality: Implemented via Flask-Login.
+"Forgot Password" (Console Link Version): Secure token generation (itsdangerous via User model methods get_reset_token, verify_reset_token) and password update flow (/reset_password_request, /reset_password/<token>, RequestResetForm, ResetPasswordForm). Reset links are currently printed to the console.
+User Model (User): Includes id, nickname, email, password_hash, created_at, last_login_at, email_confirmed_at (nullable), and UserMixin for Flask-Login.
+Session Initialization (ensure_user_session_initialized): Manages guest setup vs. authenticated user state for the main index page.
+C. Statistics Display (index.html):
+Conditional Display:
+Logged-in Users: See "Lifetime Statistics."
+Guests/Nickname-Only Users: See "Your Current Statistics" (session-based).
+For Logged-in Users:
+Overall Lifetime Stats (total questions, correct, accuracy, avg Brier, total points) from Response table.
+Personal Best Game Stats (highest game score, best game Brier) from GameSummary table.
+Current Game Progress (score, X/Y questions) from session.
+Lifetime Performance by Category: Sortable table showing questions, correct, accuracy, avg Brier, avg points per category (from Response table).
+Category Highlights: Best/worst categories based on avg Brier and avg score, subject to a minimum number of questions per category (AppSetting: min_questions_for_cat_rank).
+Calibration Chart:
+Displays lifetime data for logged-in users, session data for guests (/get_calibration_data route).
+Number of bins is user-selectable on the frontend and configurable via AppSetting (calibration_chart_bins).
+D. Leaderboards (leaderboard.html & related routes/templates):
+Tabbed interface for different leaderboard types.
+Overall Leaderboards (All-Time, Top N users via AppSetting):
+Top Lifetime Scores (sum of points from Response table).
+Top Lifetime Accuracy (from Response table, min total questions via AppSetting).
+Best Lifetime Calibration (Avg. Brier from Response table, min total questions via AppSetting).
+Best Single Game Scores (from GameSummary table).
+Best Single Game Calibration (Avg. Brier from GameSummary table).
+"By Category" Section:
+Lists eligible categories (categories with a minimum number of completed games via AppSetting: leaderboard_min_games_for_category_leaderboard).
+Clicking a category link loads its specific leaderboards (Top Game Scores, Best Game Brier, Top Accuracy within that category) via AJAX into a content area. This uses the /leaderboard/category/<category_name> route and _leaderboard_category_content.html partial template.
+Ranking on category-specific leaderboards subject to AppSetting: leaderboard_min_games_for_category_ranking.
+E. User Feedback Mechanism:
+UserFeedback model created and migrated.
+FeedbackForm created.
+/submit_feedback route and submit_feedback.html template implemented. Feedback link in base.html footer.
+Admin view (UserFeedbackAdminView) created for reviewing feedback. Email field hidden on form for logged-in users.
+F. Game Flow & UX:
+"Play This Category" buttons on index.html (category stats table) and leaderboard.html (category list) allow starting a game in a specific category.
+Handles redirection and parameter passing to index.html for auto-starting games.
+If a game is in progress, users are prompted with a window.confirm() dialog before abandoning it to start a new one via these buttons or by changing categories and clicking "Begin Game".
+Consistent "General Knowledge" category handling (stored as a string, historical NULLs migrated).
+Game progress display ("Question X / Y") updates correctly after each question.
+G. Admin Panel (Flask-Admin):
+Views for AppSetting (editable, dropdown for strategy), User (read-only), Response (read-only, shows user nickname), UserFeedback (editable notes/resolved status).
+Known Bugs Addressed Recently:
+Calibration chart tooltip errors ("data point error" for extremes, mismatch on bin change).
+Game progress display showing "X / N/A" instead of "X / Total".
+"Complete Registration" prompt appearing for logged-out users.
+index.html not inheriting from base.html (missing navbar).
+Various JavaScript ReferenceErrors and TypeErrors during UI updates.
+TypeError: 'str' object is not callable related to desc/asc shadowing in app.py.
+TemplateNotFound errors for reset_request.html and reset_token.html.
+3. Key File Overview & Logic Points:
+app.py: Main Flask application. Contains all routes, ensure_user_session_initialized, initialize_session_stats, get_setting, Flask-Login setup (LoginManager, user_loader), database query logic for stats/leaderboards, and placeholder send_reset_email.
+models.py: SQLAlchemy models (User with UserMixin and token methods, AppSetting, Response, GameSummary, UserFeedback). db = SQLAlchemy() is defined here.
+forms.py: WTForms (RegistrationForm, LoginForm, RequestResetForm, ResetPasswordForm, FeedbackForm).
+admin_views.py: Flask-Admin ModelView customizations.
+templates/index.html: Complex frontend with significant JavaScript for:
+DOMContentLoaded listener for initial UI setup based on user state (guest, nickname-only, logged-in, active question, feedback).
+Handling auto-start categories from URL params or sessionStorage.
+Functions like handleNicknameSetup, showPreGameOptions, renderQuestion, displayAnswerFeedback, updateStats, fetchCalibrationData, renderCalibrationChart, setCategoryAndBegin, startNewGame (JS version).
+Event listeners for game actions and "Play This Category" buttons.
+templates/base.html: Main site structure, navbar (with conditional links based on current_user.is_authenticated), flash messages, footer with feedback link.
+templates/leaderboard.html: Tabbed interface, includes partials for tables, AJAX call for category-specific content.
+templates/_leaderboard_*.html partials: Render individual leaderboard tables.
+templates/submit_feedback.html, reset_request.html, reset_token.html: For their respective forms.
+4. Current Detailed Roadmap (Next Steps in Order):
+Path B (Continuation): Game Engagement & Flow
+Time-Based Filters for Leaderboards:
+UI: Add dropdown/buttons on leaderboard.html (e.g., "All Time", "Last 30 Days", "Last 7 Days", "Today").
+JS: Modify JS on leaderboard.html to pass selected timespan as a query parameter when loading the main leaderboard page or when making AJAX calls for category leaderboards.
+Backend:
+Modify /leaderboard route to accept timespan param. Queries will filter Response.timestamp or GameSummary.completed_at.
+Modify /leaderboard/category/<name> route to also accept and apply timespan.
+Path C: Quick Wins & Polish
+2. Hoverable Tooltips (Feature #3 from user list):
+* Identify terms (Brier score, Accuracy, etc.) on index.html stats and leaderboard.html.
+* Implement using simple HTML title attributes or a lightweight JS tooltip solution.
+3. Social Sharing - Tweet Game Results (Feature #1, game results part):
+* On game completion (in displayAnswerFeedback JS), provide a "Share to X/Twitter" button.
+* JS to construct a Twitter Web Intent URL with pre-filled text (category, score, link to site).
+Future Major Feature Blocks (Post A, B, C):
+FMFB 1: Advanced Account Management & Security
+"Forgot Password" - Actual Email Sending: Integrate Flask-Mail.
+Profile Page Enhancements: "Change Password," "Change Nickname."
+Delete All Response History (Feature #5).
+Email Confirmation for New Registrations.
+FMFB 2: Dynamic Content & Engagement
+Category of the Day (Feature #2): Gemini integration, admin scheduling, daily leaderboards.
+Social Sharing - Calibration Chart Image (Feature #1, chart part).
+FMFB 3: Ongoing Maintenance & Iteration
+Admin Panel enhancements.
+Performance Optimization (query review, caching).
+UI/UX review based on feedback from your new mechanism.
+Accessibility review.
